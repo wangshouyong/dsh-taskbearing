@@ -1,0 +1,65 @@
+{
+  "name": "dsh-taskbearing",
+  "version": "0.1.0",
+  "description": "DSH 工作区级任务记忆与方向恢复插件：需求树 / 双线状态 / 逐字原话基线 / 右侧栏任务板",
+  "type": "module",
+  "engines": {
+    "node": ">=22.15.0"
+  },
+  "main": "./src/host/index.js",
+  "exports": {
+    ".": "./src/host/index.js",
+    "./client": "./lib/client.js",
+    "./core": "./src/core/tools.js",
+    "./store": "./src/core/store.js",
+    "./rules": "./src/host/rules.js",
+    "./session": "./src/host/session.js",
+    "./turn": "./src/host/turn.js",
+    "./routes": "./src/host/routes.js"
+  },
+  "files": [
+    "lib",
+    "src",
+    "docs",
+    "README.md",
+    "README.en.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "plugin",
+    "task-board",
+    "project-memory",
+    "ai-agent",
+    "context-handoff"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wangshouyong/dsh-taskbearing.git"
+  },
+  "homepage": "https://github.com/wangshouyong/dsh-taskbearing#readme",
+  "bugs": {
+    "url": "https://github.com/wangshouyong/dsh-taskbearing/issues"
+  },
+  "author": "wangshouyong",
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-layout"
+      ]
+    }
+  },
+  "scripts": {
+    "test": "node --test",
+    "test:watch": "node --test --watch",
+    "build:client": "node scripts/build-client.mjs"
+  },
+  "devDependencies": {
+    "vite": ">=5"
+  },
+  "license": "MIT"
+}
