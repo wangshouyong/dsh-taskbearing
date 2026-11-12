@@ -145,7 +145,7 @@ docs/        设计文档（philosophy / schema-v2 / ui-design）
 - 追溯跳转依赖会话日志（`$DSH_HOME/sessions`）：会话没有持久化日志时只能「打开原会话」，无法核验轮次（会显式提示，不猜）。
 - 祖先链硬校验作用于「写详情 / 标记已执行」；纯状态推进（未开始 → 进行中）不阻断，父链是否陈旧由 `compass_status.health.stale_chains` 机械暴露。
 - `compass_migrate`（历史文档）与整板 bundle 恢复豁免祖先链校验；`compass_import` 回填「已执行」节点必须自带合格完成说明。
-- CI 只在主平台 **Windows** 上跑单测（POSIX 可运行但未做全平台回归）；构建 client facet 的 job 在 Linux 上跑。
+- CI 单测在 **Windows + Linux** 双平台（node 22/24）跑；构建 client facet 与文档镜像检查在 Linux 上跑（与 npm publish 工作流同平台，避免平台差异悄悄卡住发布门禁）。
 - 任务质量取决于 AI 是否按规则维护；插件只做机械校验，不做语义判断。
 
 ## 贡献

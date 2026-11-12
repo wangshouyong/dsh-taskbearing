@@ -2,6 +2,11 @@
 
 本项目遵循语义化版本（SemVer）。当前为首次公开版本。
 
+## 未发布
+
+- 修复：`test/paths.test.js` 两个工作区路径用例改为按平台断言（Windows 盘符大小写语义只在 win32 断言；hash 大小写归一只在 win32/darwin 断言），修复 npm publish 工作流 gate 在 `ubuntu-latest` 上 2 个用例失败、导致 `publish with provenance` 步骤一直被 skip（npm 从未发布成功）。
+- CI：单测矩阵加入 `ubuntu-latest`（node 22/24），与 npm publish 工作流同平台，POSIX 行为纳入回归。
+
 ## 0.1.0（2026-11-12）
 
 首次公开。

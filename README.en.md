@@ -144,7 +144,7 @@ docs/        design docs (philosophy / schema-v2 / ui-design)
 - The ancestor-chain gate applies to "write detail / mark done"; plain status transitions (not started → in progress) are not blocked — stale parent chains are surfaced by `compass_status.health.stale_chains`.
 - `compass_migrate` and whole-board bundle restore are exempt from the ancestor gate; `compass_import` nodes marked "done" must carry a qualified completion note.
 - Requires DSH host APIs (tool registration, right-sidebar tab, webServer routes); the UI cannot run in a standalone Node process.
-- CI runs unit tests on **Windows** only (the primary platform; POSIX runs but is not fully regression-tested); the client-facet build job runs on Linux.
+- CI runs unit tests on **Windows and Linux** (node 22/24); the client-facet build and docs-mirror checks run on Linux — the same platform as the npm publish workflow, so platform differences cannot silently block the publish gate.
 - Task quality depends on the AI following the rules; the plugin only does mechanical checks, not semantic judgement.
 
 ## Contributing

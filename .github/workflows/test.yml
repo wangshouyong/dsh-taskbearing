@@ -11,7 +11,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest]
+        # 与 npm publish 工作流（ubuntu-latest 上跑 node --test）保持同平台覆盖，
+        # 避免「Windows 绿、ubuntu 红」再次把 publish gate 卡死（P1 回归）。
+        os: [windows-latest, ubuntu-latest]
         node: [22, 24]
     runs-on: ${{ matrix.os }}
     steps:
