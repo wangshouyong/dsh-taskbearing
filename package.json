@@ -21,6 +21,7 @@
     "lib",
     "src",
     "docs",
+    "scripts",
     "README.md",
     "README.en.md",
     "CHANGELOG.md",
@@ -34,7 +35,8 @@
     "task-board",
     "project-memory",
     "ai-agent",
-    "context-handoff"
+    "context-handoff",
+    "dsh-compass"
   ],
   "repository": {
     "type": "git",
@@ -57,10 +59,15 @@
     "test": "node --test",
     "test:watch": "node --test --watch",
     "build:client": "node scripts/build-client.mjs",
-    "docs:check": "node scripts/check-docs-en.mjs"
+    "docs:check": "node scripts/check-docs-en.mjs",
+    "prepublishOnly": "node --test && node scripts/check-docs-en.mjs"
   },
   "devDependencies": {
     "vite": ">=5"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
 }

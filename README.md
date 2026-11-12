@@ -55,9 +55,11 @@
 
 1. 把包装进你使用的 DSH profile（任选其一）：
    ```bash
-   # npm 安装（发布后）
+   # 从 npm 安装（推荐；以 registry 上已发布的版本为准）
    cd "$DSH_HOME/profiles/<profile>"
    npm install dsh-taskbearing
+   # 或直接从 GitHub 安装（想追主干/尚未发布时）
+   npm install github:wangshouyong/dsh-taskbearing
    # 或开发期本地链接（Windows junction / Unix symlink）
    #   <profile>/node_modules/dsh-taskbearing -> 本仓库路径
    ```

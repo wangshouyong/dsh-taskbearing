@@ -54,9 +54,11 @@ The plugin consists of a host facet and a client facet, loaded as a plugin of a 
 
 1. Put the package into the DSH profile you use (either way):
    ```bash
-   # npm install (once published)
+   # install from npm (recommended; use the version published on the registry)
    cd "$DSH_HOME/profiles/<profile>"
    npm install dsh-taskbearing
+   # or install straight from GitHub (track main / before first publish)
+   npm install github:wangshouyong/dsh-taskbearing
    # or link locally during development (Windows junction / Unix symlink)
    #   <profile>/node_modules/dsh-taskbearing -> path to this repo
    ```
