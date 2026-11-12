@@ -2,6 +2,11 @@
 
 本项目遵循语义化版本（SemVer）。
 
+## 0.1.2（2026-11-12）
+
+- 修复（仅测试夹具，运行时代码不变）：`test/routes.test.js` 写会话日志的夹具改为先用 `resolveWorkspacePath` 规范化工作区，再算 `workspaceSessionKey`——与路由同一规则。`windows-latest` 的临时目录含 8.3 短名（如 `RUNNER~1`）时，realpath 后路径与夹具不同，导致 `history-summary` 用例误报 `0 !== 2`、v0.1.1 的 Windows CI 门禁失败（Linux 与本地 Windows 均绿；发布 tarball 不含 `test/`，运行不受影响）。
+- 门禁：274/274；Windows + Linux 全绿。
+
 ## 0.1.1（2026-11-12）
 
 修复一批用户现场问题，均带真机复现与回归用例。

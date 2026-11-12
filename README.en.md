@@ -63,7 +63,7 @@ The plugin consists of a host facet and a client facet, loaded as a plugin of a 
    npm install github:wangshouyong/dsh-taskbearing
    # option 2: download the GitHub Release tarball and install locally
    #   https://github.com/wangshouyong/dsh-taskbearing/releases
-   npm install ./dsh-taskbearing-0.1.1.tgz
+   npm install ./dsh-taskbearing-0.1.2.tgz
    # or link locally during development (Windows junction / Unix symlink)
    #   <profile>/node_modules/dsh-taskbearing -> path to this repo
    ```

@@ -64,7 +64,9 @@ async function makeEnv(t) {
 
 /** 写一份真实格式（zstd 帧）的会话日志：第 3 轮未结束。 */
 async function writeSessionLog(sessionsRoot, workspace, sessionId) {
-  const dir = path.join(sessionsRoot, workspaceSessionKey(workspace), sessionId);
+  // 与路由一致：路由会先 resolveWorkspacePath（realpath + 正斜杠），CI 的临时目录可能含 8.3 短名，
+  // 不 resolve 会写出一个路由读不到的会话目录（windows-latest 曾因此 0 !== 2）。
+  const dir = path.join(sessionsRoot, workspaceSessionKey(resolveWorkspacePath(workspace)), sessionId);
   await fs.mkdir(dir, { recursive: true });
   const time = Date.parse("2026-11-11T08:49:25.604Z");
   const events = [
@@ -238,7 +240,7 @@ test("/history-summary：只读历史会话摘要（无会话/多会话/跨工�
   const sidB = "session-bbbbbbbb-1111-2222-3333-444455556666";
   await writeSessionLog(env.sessionsRoot, env.workspace, sidA);
   await writeSessionLog(env.sessionsRoot, env.workspace, sidB);
-  const workDir = path.join(env.sessionsRoot, workspaceSessionKey(env.workspace));
+  const workDir = path.join(env.sessionsRoot, workspaceSessionKey(resolveWorkspacePath(env.workspace)));
   const beforeMtimes = {};
   for (const sid of [sidA, sidB]) {
     beforeMtimes[sid] = (await fs.stat(path.join(workDir, sid, "session.v4.jsonl.zstd"))).mtimeMs;

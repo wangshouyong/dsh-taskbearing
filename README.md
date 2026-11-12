@@ -64,7 +64,7 @@
    npm install github:wangshouyong/dsh-taskbearing
    # 方式二：下载 GitHub Release 的 tarball 后本地安装
    #   https://github.com/wangshouyong/dsh-taskbearing/releases
-   npm install ./dsh-taskbearing-0.1.1.tgz
+   npm install ./dsh-taskbearing-0.1.2.tgz
    # 或开发期本地链接（Windows junction / Unix symlink）
    #   <profile>/node_modules/dsh-taskbearing -> 本仓库路径
    ```
