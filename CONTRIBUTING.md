@@ -2,6 +2,12 @@
 
 感谢参与。本仓库是 DSH 插件 **dsh-taskbearing** 的实现仓库，设计契约是唯一权威。
 
+## 文档双语规则
+
+- `docs/philosophy.md`、`docs/schema-v2.md` 的中文版是**唯一权威**，英文镜像 `docs/<name>.en.md` 必须同步；
+- 契约变更顺序：先改中文权威版 → 再同步英文镜像 → 跑 `node scripts/check-docs-en.mjs`（CI 会跑同一检查）；
+- `docs/ui-design.md` 是历史设计稿，仅中文，行为以 philosophy/schema-v2 为准。
+
 ## 开发环境
 
 - Node.js ≥ 20

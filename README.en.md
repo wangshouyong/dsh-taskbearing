@@ -127,9 +127,9 @@ docs/        design docs (philosophy / schema-v2 / ui-design)
 
 ## Docs
 
-- [Design philosophy & user guide](docs/philosophy.md) (Chinese: business rules, state machine, glossary)
-- [Data & API contract schema-v2](docs/schema-v2.md) (Chinese: JSON structures, fields, tool APIs)
-- [UI implementation notes](docs/ui-design.md) (Chinese, historical design doc)
+- [Design philosophy & user guide](docs/philosophy.md) (中文) | [English](docs/philosophy.en.md) — business rules, state machine, glossary
+- [Data & API contract schema-v2](docs/schema-v2.md) (中文) | [English](docs/schema-v2.en.md) — JSON structures, fields, tool APIs, error codes
+- [UI implementation notes](docs/ui-design.md) (Chinese only, historical design doc)
 
 ## Known limitations
 

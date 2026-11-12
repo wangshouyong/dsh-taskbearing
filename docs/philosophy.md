@@ -1,5 +1,9 @@
 # dsh-taskbearing 设计哲学与使用指南
 
+[**中文**](philosophy.md) | [English](philosophy.en.md)
+
+> **本文件为中文权威版**；英文镜像见 [philosophy.en.md](philosophy.en.md)。契约变更先改中文版，再同步英文镜像。
+
 > 面向**用户**与**开发者**：这个插件为什么这样设计、任务板怎么用、状态怎么流转、哪些事它不做。
 > 数据结构、字段格式、工具 API 与迁移/交换格式见 [schema-v2.md](schema-v2.md)。
 

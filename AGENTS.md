@@ -31,4 +31,5 @@ npm run build:client # 构建 client facet（需 vite；VITE_BIN 可覆盖）
 5. **写操作串行 + 原子写**：所有写经 `Store.run` 队列 + 临时文件 rename；禁止直接截断目标文件。
 6. **数据留 `$DSH_HOME`**：不得把任务板数据写进工作区目录。
 7. **不静默降级**：降级路径必须可见（UI 文案或日志），并登记到契约的待定/风险项。
-8. **中文注释与文案**；错误码用契约 §5.1 的 `E_*` 常量，不新增魔法字符串。
+8. **文档双语镜像**：`docs/philosophy.md` / `docs/schema-v2.md` 的中文版是唯一权威；改动契约先改中文，再同步 `docs/<name>.en.md`，并跑 `node scripts/check-docs-en.mjs`（CI 同款检查）。
+9. **中文注释与文案**；错误码用契约 §5.1 的 `E_*` 常量，不新增魔法字符串。

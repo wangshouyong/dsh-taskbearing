@@ -128,9 +128,9 @@ docs/        设计文档（philosophy / schema-v2 / ui-design）
 
 ## 文档
 
-- [设计哲学与使用指南](docs/philosophy.md)（面向用户/开发者：业务规则、状态机、术语表）
-- [数据与接口契约 schema-v2](docs/schema-v2.md)（面向二次开发：JSON 结构、字段、工具 API）
-- [UI 实现细则](docs/ui-design.md)（历史设计文档）
+- [设计哲学与使用指南](docs/philosophy.md)（中文）｜[English](docs/philosophy.en.md)（面向用户/开发者：业务规则、状态机、术语表）
+- [数据与接口契约 schema-v2](docs/schema-v2.md)（中文）｜[English](docs/schema-v2.en.md)（面向二次开发：JSON 结构、字段、工具 API、错误码）
+- [UI 实现细则](docs/ui-design.md)（历史设计文档，仅中文）
 
 ## 已知限制
 

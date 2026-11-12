@@ -56,7 +56,8 @@
   "scripts": {
     "test": "node --test",
     "test:watch": "node --test --watch",
-    "build:client": "node scripts/build-client.mjs"
+    "build:client": "node scripts/build-client.mjs",
+    "docs:check": "node scripts/check-docs-en.mjs"
   },
   "devDependencies": {
     "vite": ">=5"
