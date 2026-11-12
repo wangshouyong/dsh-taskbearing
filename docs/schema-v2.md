@@ -4,11 +4,11 @@
 
 > **本文件为中文权威版**；英文镜像见 [schema-v2.en.md](schema-v2.en.md)。契约变更先改中文版，再同步英文镜像。
 
-> 适用版本：`0.1.0`。文中「v1.2x」是内部迭代标记，仅用于指明某项约定的引入时间，不是对外版本号。
+> 适用版本：`0.1.1`。文中「v1.2x」是内部迭代标记，仅用于指明某项约定的引入时间，不是对外版本号。
 
 > 面向二次开发：数据结构、字段格式、工具 API、状态枚举与迁移/交换格式。
 > 产品行为、设计哲学与使用方式见 [philosophy.md](philosophy.md)。
-> 当前数据格式：`meta.json` / `tree.json` schema `1`，`baseline.md` schema `2`（多行原话转义）。文档版本：基于契约 v1.29。
+> 当前数据格式：`meta.json` / `tree.json` schema `1`，`baseline.md` schema `2`（多行原话转义）。文档版本：基于契约 v1.32。
 
 本文件中的路径占位符：`<DSH_HOME>` = DSH 用户数据根目录；`<WORKSPACE_PATH>` = 当前工作区根目录。
 
@@ -79,12 +79,13 @@
 
 ### 3.6 追溯与会话核验只读接口
 
-宿主 host facet 提供两个只读 HTTP 路由，供 UI 在「追溯跳转」前做事实核验（不写任何数据）：
+宿主 host facet 提供三个只读 HTTP 路由，供 UI 做事实核验（不写任何数据）：
 
 | 接口 | 方法 | 说明 |
 |---|---|---|
 | `/api/compass/session-links?cwd=&ids=a,b,c` | GET | 按会话日志核验存在性；返回 `{sessions:[{session, exists, origin, openable, target_session}]}`；单次 ≤ 50 个。`origin="subagent"` 表示子代理会话（不可直接打开，`target_session` 给父会话） |
 | `/api/compass/session-turn?cwd=&session=&turn=&at=` | GET | 跳转前核验/还原真实轮次；返回 `{exists, log_available, turn_count, requested_turn, turn, source, origin, target_session}`；`source ∈ exact / by-at / exact-no-at / parent-at` |
+| `/api/compass/history-summary?cwd=` | GET | 面板「暂无数据」空态用：返回本工作区历史会话摘要 `{available, sessions, latest_at, truncated}`。只扫会话目录 + stat，不解压会话日志、不写盘；`sessions>0` 表示是「插件安装前就有会话的旧工作区」 |
 
 规则：
 
@@ -92,6 +93,7 @@
 2. `at` 权威：`at` 能定位到轮次就以它为准（旧数据写错的 `turn` 会被还原并标 `by-at`）；`at` 缺失或定位不到时，只有 `turn` 真实存在于日志才接受。
 3. 日志不可读 ⇒ `log_available=false`；UI 必须显式降级，不得猜测轮次。
 4. 子代理会话：返回父会话 `target_session` 与父会话对应轮次；父会话日志缺失时 `turn=null`。
+5. `history-summary` 不依赖任务板是否已初始化；宿主未提供会话日志根目录时返回 `available=false`，客户端按「无法读取历史会话摘要」降级，不阻塞空态。
 
 ## 4 存储设计
 
@@ -410,7 +412,8 @@ $DSH_HOME/storages/compass/<工作区名>-<hash>/
 | 错误码 | 含义 | 触发工具 |
 |---|---|---|
 | `E_INVALID_ARG` | 参数缺失/类型/取值非法 | 全部 |
-| `E_NOT_INITIALIZED` | 工作区未初始化（无 `meta.json`） | require/plan/update/read/change/merge |
+| `E_NOT_INITIALIZED` | 工作区未初始化（无 `meta.json`）。**状态而非故障**：`/tree` 返回 HTTP 404 + 该 code 时，客户端必须识别为「暂无数据」空态，不得显示「旧版宿主」 | require/plan/update/read/change/merge、路由 |
+| `E_NOT_FOUND` | 未知路由（宿主版本低于客户端预期时的唯一信号）。只有它才被客户端映射为「旧版宿主，缺少该接口」 | 路由层 |
 | `E_PARENT_REQUIRED` | 建任务未给 `parent_id`（需求层请用 `compass_require`） | plan |
 | `E_ORIGINAL_UNRESOLVED` | 原话取回失败（**warning 级**：写入成功但原话待锁） | require/change |
 | `E_ORIGINAL_MISMATCH` | `original_text` 与当前会话用户消息不逐字一致（**错误级**：不写任何数据，提示改用 refs 由插件取回） | require/change |
@@ -764,6 +767,7 @@ $DSH_HOME/storages/compass/<工作区名>-<hash>/
 2. 本次写详情的节点（含「标记已执行」即便继承旧详情）⇒ 其**整条祖先链**必须在同批 `details` 里给汇总；缺任一祖先 ⇒ `E_ANCESTOR_DETAIL_REQUIRED`（不写任何数据）。
 3. 需求即将聚合为「已执行」⇒ 需求详情必须已满足 summary 标准；否则 `E_REQUIREMENT_DETAIL_REQUIRED`。
 4. `update` 返回 `rollups`（本次写入的祖先链汇总 id），`updated` 包含祖先。
+5. **「继承旧详情」不豁免祖先链（v0.1.1 起由代码强制）**：标记「已执行」但本次没有写详情（继承合格旧详情）同样视为一次完成动作，祖先链汇总必须同批提供，否则 `E_ANCESTOR_DETAIL_REQUIRED`；批量逐任务同样适用。避免「继承」成为绕过父链汇总的后门。
 
 **存量自检（`compass_status.health`）**
 

@@ -225,6 +225,49 @@ test("未初始化：/tree 返回 404（E_NOT_INITIALIZED），不静默", async
   assert.equal(res.body.error.code, "E_NOT_INITIALIZED");
 });
 
+test("/history-summary：只读历史会话摘要（无会话/多会话/跨工作区/未初始化可用）（B-63）", async (t) => {
+  const env = await makeEnv(t);
+  const url = `/api/compass/history-summary?cwd=${encodeURIComponent(env.workspace)}`;
+
+  // 未初始化也能用（这是空态判断的输入，不依赖任务板）
+  const empty = await env.call("GET", url);
+  assert.equal(empty.status, 200);
+  assert.deepEqual(empty.body, { available: true, sessions: 0, latest_at: null, truncated: false });
+
+  const sidA = "session-aaaaaaaa-1111-2222-3333-444455556666";
+  const sidB = "session-bbbbbbbb-1111-2222-3333-444455556666";
+  await writeSessionLog(env.sessionsRoot, env.workspace, sidA);
+  await writeSessionLog(env.sessionsRoot, env.workspace, sidB);
+  const workDir = path.join(env.sessionsRoot, workspaceSessionKey(env.workspace));
+  const beforeMtimes = {};
+  for (const sid of [sidA, sidB]) {
+    beforeMtimes[sid] = (await fs.stat(path.join(workDir, sid, "session.v4.jsonl.zstd"))).mtimeMs;
+  }
+
+  const two = await env.call("GET", url);
+  assert.equal(two.status, 200);
+  assert.equal(two.body.sessions, 2);
+  assert.equal(typeof two.body.latest_at, "string");
+  assert.equal(two.body.truncated, false);
+
+  // 只读：不产生/不修改任何会话文件
+  for (const sid of [sidA, sidB]) {
+    const after = (await fs.stat(path.join(workDir, sid, "session.v4.jsonl.zstd"))).mtimeMs;
+    assert.equal(after, beforeMtimes[sid], "会话日志 mtime 不得变化");
+  }
+
+  // 其它工作区不计
+  const otherWs = path.join(env.root, "ws2");
+  await fs.mkdir(otherWs, { recursive: true });
+  const other = await env.call("GET", `/api/compass/history-summary?cwd=${encodeURIComponent(otherWs)}`);
+  assert.equal(other.body.sessions, 0);
+
+  // 缺少 cwd ⇒ 明确错误，不猜工作区
+  const missing = await env.call("GET", "/api/compass/history-summary");
+  assert.equal(missing.status, 400);
+  assert.equal(missing.body.error.code, "E_INVALID_ARG");
+});
+
 test("/status 返回板面新鲜度（只读机械计数）", async (t) => {
   const env = await makeEnv(t);
   await seed(env.storageRoot, env.workspace);

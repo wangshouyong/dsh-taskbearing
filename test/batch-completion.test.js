@@ -320,6 +320,45 @@ test("幂等重标已执行：已执行节点不需要重复提供完成说明�
   }
 });
 
+test("继承旧详情也不能绕过祖先链（B-62 补，v1.32）：单节点/批量都必须同批写祖先汇总", async () => {
+  const env = await makeEnv();
+  try {
+    await seedTwoTasks(env);
+    // 先写合格完成说明（未标已执行）；写详情本身要求祖先汇总
+    await env.compass.update({ task_ids: ["R-001-T-1"], detail: BUILD_DETAIL, details: ANCESTOR });
+    await env.compass.update({ task_ids: ["R-001-T-2"], detail: BUILD_DETAIL, details: ANCESTOR });
+
+    // 单节点：继承旧详情但不写祖先汇总 ⇒ 祖先链门必须拒绝（否则「继承」成为后门）
+    const single = await rejectsWith(
+      env.compass.update({ task_ids: ["R-001-T-1"], exec_state: "已执行", pointer_note: "完成" }),
+      "E_ANCESTOR_DETAIL_REQUIRED"
+    );
+    assert.deepEqual(single.details.missing_ancestors, ["R-001"]);
+    const before = await env.store.readTree();
+    assert.equal(before.root.children[0].children[0].exec_state, "进行中", "失败整次不写：状态未变");
+
+    // 批量：两条都继承旧详情但不写祖先汇总 ⇒ 同样拒绝
+    const batch = await rejectsWith(
+      env.compass.update({ task_ids: ["R-001-T-1", "R-001-T-2"], exec_state: "已执行", pointer_note: "完成" }),
+      "E_ANCESTOR_DETAIL_REQUIRED"
+    );
+    assert.deepEqual(batch.details.missing_ancestors, ["R-001"]);
+
+    // 补上祖先汇总后成功，完成说明保持继承（没有重写）
+    const res = await env.compass.update({
+      task_ids: ["R-001-T-1"],
+      exec_state: "已执行",
+      pointer_note: "完成",
+      details: ANCESTOR
+    });
+    assert.deepEqual(new Set(res.updated), new Set(["R-001-T-1", "R-001"]));
+    assert.ok(res.rollups.includes("R-001"), "祖先汇总随本批写入");
+    assert.equal(await env.store.readDetail("R-001-T-1"), BUILD_DETAIL, "继承旧详情，不被改写");
+  } finally {
+    await env.cleanup();
+  }
+});
+
 test("修改/构建型路径必须真实存在：真实路径可写（回归）", async () => {
   const env = await makeEnv();
   try {

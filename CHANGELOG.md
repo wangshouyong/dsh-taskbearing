@@ -1,12 +1,22 @@
 # Changelog
 
-本项目遵循语义化版本（SemVer）。当前为首次公开版本。
+本项目遵循语义化版本（SemVer）。
 
-## 未发布
+## 0.1.1（2026-11-12）
 
+修复一批用户现场问题，均带真机复现与回归用例。
+
+- **新增：旧会话暂无数据空态与历史回填入口**。插件安装前的旧会话（工作区还没有任务板数据）不再显示「读取失败/旧版宿主」：面板识别本工作区历史会话数，给「回填历史会话 / 暂不回填」两个选择；不点不写盘、不发 AI 指令。回填按钮把固定指令（`compass_status → compass_init → compass_import(preview) → apply`，原话只允许 refs、禁止代写）发进当前会话；宿主不支持发送 / 会话被其他 DSH 宿主占用时复制指令并显示原因。回填后 2s 轮询自动出现板面。
+- **新增：只读接口 `GET /api/compass/history-summary`**（工作区历史会话数 / 最近时间；只扫会话目录 + stat，不解压日志、不写盘）。
+- **修复：旧会话被误报成旧版宿主**。只有未知路由 `E_NOT_FOUND` 才映射「旧宿主缺接口」；`E_NOT_INITIALIZED`（未初始化，HTTP 404）改为可识别的「暂无数据」状态。
+- **修复：详情弹窗不随板面更新**。弹窗打开期间板面变化自动重拉 AI 详情/追溯链（备注编辑中保留草稿）；面板切回立即刷新——不再把「没刷新」误判成「详情被绕过/校验失效」。
+- **修复：轮次跳转「假成功」**。`scrollIntoView` 在 DSH 聊天滚动容器里会被吞，出现「提示已定位、也高亮，但画面没动」。改为走宿主轮次导航加载历史 + 直接滚动容器并复核目标进入视口；失败如实提示「已高亮但未能滚动」，不再谎报已定位。
+- **修复：面板样式被连带删除**。DSH 0.2.0-rc.2 `client-modules` 会把无主 `<style>` 认领给后物化的插件，其重载时连带删除。现在 `<style>` 创建即带 `data-plugin` 归属，并在面板挂载 / 轮询 / 切回时自愈（≤2s）；client bundle 改原子写，避免热加载读到半截文件。
+- **修复：标记「已执行」继承旧详情时绕过祖先链校验**（`E_ANCESTOR_DETAIL_REQUIRED` 现覆盖继承路径；批量同样适用）。
 - 修复：`test/paths.test.js` 两个工作区路径用例改为按平台断言（Windows 盘符大小写语义只在 win32 断言；hash 大小写归一只在 win32/darwin 断言），修复 npm publish 工作流 gate 在 `ubuntu-latest` 上 2 个用例失败、导致 `publish with provenance` 步骤一直被 skip（npm 从未发布成功）。
-- CI：单测矩阵加入 `ubuntu-latest`（node 22/24），与 npm publish 工作流同平台，POSIX 行为纳入回归。
-- 文档：`README` / `README.en` 移除「从 npm 安装」这一尚未发布的渠道，安装只保留 GitHub 直装与 Release tarball 两种可用方式。
+- CI：单测矩阵加入 `ubuntu-latest`（node 22/24），与 npm publish 工作流同平台，POSIX 行为纳入回归；publish 工作流在未配置 `NPM_TOKEN` 时**优雅跳过** npm 发布（不再红叉），配置后自动发布。
+- 文档：`README` / `README.en` 移除「从 npm 安装」这一尚未发布的渠道，安装只保留 GitHub 直装与 Release tarball 两种可用方式；`docs/schema-v2` 补 `history-summary` 接口与错误码语义，`docs/philosophy` 补空态/回填、自动刷新、跳转真实滚动与回填隐私边界，`docs/ui-design` 升 v1.2。
+- 门禁：单元测试 **274/274**（新增空态、样式归属、轮次跳转滚动模型等用例）；CI 覆盖 Windows + Linux。
 
 ## 0.1.0（2026-11-12）
 

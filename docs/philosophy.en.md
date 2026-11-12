@@ -58,6 +58,8 @@ If any link cannot be obtained, prefer marking it "pending lock / pending confir
 
 Every degraded path must be visible: unreadable original text shows "original pending lock"; when the host cannot open files the path is copied with a hint; an outdated host shows "old host, restart to enable"; anchor detection failures produce an explicit hint. **Failures are never dressed up as successes.**
 
+Two cases must not be confused with degradation: **"this workspace has no board data yet" is neither degradation nor an error** — it is the "no data yet" empty state (see §3); and **when the panel stylesheet is deleted as a side effect of the host hot-reloading another plugin**, the panel self-heals (styles declare their owner and are re-installed within ~2s; see appendix E of `docs/ui-design.md`) instead of sitting there unstyled as if it were broken.
+
 ### 2.4 Separation of human and AI writers
 
 Each file has exactly one writer:
@@ -96,6 +98,8 @@ Open the right sidebar of any session → the "Task board" card.
 - **Search**: filter within the current view; matching nodes auto-expand their ancestor chain.
 - **Copy handoff**: one click at the bottom of the detail panel copies "task id / path / dual status / traceability / requirement surface / detail / notes".
 - **Refresh**: the panel polls every 2 seconds; editing notes is not interrupted; manual refresh is available when updates exist.
+- **Detail follows the board**: details and traceability written by the AI while a detail dialog is open show up automatically (your in-progress note draft is never overwritten); the panel also refreshes immediately when it becomes visible again, with no need to close and reopen.
+- **"No data yet" asks you first**: an old session created before the plugin existed (workspace has no board data yet) shows "no board data", detects how many history sessions the workspace has, and offers **"backfill history"** / **"not now"**. Nothing is written and no AI message is sent unless you click; clicking backfill sends one fixed instruction into the current session so the AI runs the history-backfill flow (original words are read verbatim by the plugin, never paraphrased by the AI).
 - **Theme and width**: follows the host's light/dark theme; the panel remains usable down to 340px with no horizontal scrolling (long text truncates or wraps).
 
 ### Handoff flow (user SOP)
@@ -165,6 +169,8 @@ Every node creation, status change, verdict change, merge, move, and note write 
 The traceability chain in the detail panel supports **jumping back to the original session** and **locating and highlighting turn N**. It is the evidence chain for reviewing "why was this decided at the time".
 
 **Jumps are verified, not trusted**: before jumping, the plugin checks whether that "turn N" really exists in the session log. Legacy data with a wrong turn is restored from the record's time (`at`, authoritative); records from **subagent sessions** cannot be opened directly and jump to the corresponding turn of the **parent session** instead. Historical sessions missing from the session list are verified via the session log instead of being falsely reported as "session unavailable"; when verification fails the plugin says why (log missing / turn missing / not rendered) instead of pretending the jump succeeded.
+
+**A jump must actually scroll, not just highlight text**: the chat area is a virtual list, so older turns must be loaded. The plugin prefers the host's own turn-navigation action (it loads history and lands the turn), then scrolls the chat scroller directly to the target position and, after ~0.3s, **verifies that the target really entered the viewport**. If the host's scroll anchoring swallowed the movement, it retries once; if it still fails it says "turn N is highlighted but could not be scrolled to" — **no more "reported jumped, highlighted, but the view did not move" false success** (since v0.1.1).
 
 ### Cross-session collision hint
 
@@ -286,7 +292,8 @@ The plugin never auto-summarises (that is the AI's judgement) and never "compres
 - **Old host**: after upgrading the plugin, restart DSH to load the new host-side logic (the panel shows "old host" instead of an error);
 - **Turn may be missing**: turn navigation depends on session logs (`<DSH_HOME>/sessions`); without a persisted log only "open the original session" is possible, and the plugin says so explicitly instead of inventing a turn;
 - **Scope of the ancestor-chain check**: the hard check applies to "write detail / mark done"; plain status transitions (not started → in progress) are not blocked — stale parent chains are surfaced by `compass_status.health.stale_chains`; `compass_migrate` and whole-board restore are exempt;
-- **Subagent sessions**: a subagent's session records cannot be opened in the chat area like a main session; traceability can only jump to the corresponding turn of the parent session.
+- **Subagent sessions**: a subagent's session records cannot be opened in the chat area like a main session; traceability can only jump to the corresponding turn of the parent session;
+- **Privacy boundary of history backfill**: backfill is designed around "original words are stored verbatim", so it writes the user's original messages from history sessions into the board baseline. **If the history contains pasted API keys or passwords, backfill copies them into the baseline file as well** — decide per workspace whether to backfill sensitive history, and rotate/clean secrets in history first.
 
 ---
 

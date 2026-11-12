@@ -178,15 +178,26 @@ test("文件地址：session 地址编码（逐段/冒号字面）与 cwd 相对
   assert.equal(fileAddressFor(SID, null, "src/a.ts"), sessionFileAddress(SID, "src/a.ts"));
 });
 
-test("旧宿主缺路由：E_NOT_FOUND / 404 转为可读提示（B-55）", () => {
+test("错误分类（B-55 + v1.32/B-63）：只有未知路由算旧宿主；未初始化是状态不是故障", () => {
   const outdated = describeApiError({ code: "E_NOT_FOUND", message: "unknown route: GET /workspaces" }, 404);
   assert.equal(outdated.code, "E_HOST_OUTDATED");
   assert.match(outdated.message, /旧版宿主/);
   assert.match(outdated.message, /重启 DSH/);
   assert.doesNotMatch(outdated.message, /unknown route/);
 
+  // 裸 404（无 code）仍视为路由层未实现（旧宿主）
   const plain404 = describeApiError({}, 404);
   assert.equal(plain404.code, "E_HOST_OUTDATED");
+
+  // v1.32：E_NOT_INITIALIZED 也是 404，但必须原样上抛，由面板进入「暂无数据」空态
+  const uninitialized = describeApiError(
+    { code: "E_NOT_INITIALIZED", message: "任务树不存在，请先调用 compass_init" },
+    404
+  );
+  assert.equal(uninitialized.code, "E_NOT_INITIALIZED");
+  assert.doesNotMatch(uninitialized.message, /旧版宿主/);
+  assert.doesNotMatch(uninitialized.message, /重启 DSH/);
+  assert.match(uninitialized.message, /未初始化/);
 
   const other = describeApiError({ code: "E_INVALID_ARG", message: "cwd 非法" }, 400);
   assert.equal(other.code, "E_INVALID_ARG");

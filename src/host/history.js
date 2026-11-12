@@ -172,6 +172,48 @@ export async function listWorkspaceSessions(input) {
 }
 
 /**
+ * 工作区历史会话摘要（B-63 / v1.32，只读）：面板在「暂无数据」空态用它判断
+ * 「插件安装前就有的旧会话」还是「全新工作区」。
+ * 只列会话目录 + stat（不解压会话日志、不写盘）；损坏/不可读的会话计入但跳过。
+ * @param {{sessionsRoot: string, workspacePath: string, limit?: number}} input
+ * @returns {Promise<{sessions: number, latestMs: number|null, truncated: boolean}>}
+ */
+export const SUMMARY_SESSION_LIMIT = 2000;
+
+export async function summarizeWorkspaceSessions(input) {
+  const { sessionsRoot, workspacePath } = input;
+  const limit = Number.isInteger(input?.limit) && input.limit > 0 ? input.limit : SUMMARY_SESSION_LIMIT;
+  const key = workspaceSessionKey(workspacePath);
+  const dir = path.join(sessionsRoot, key);
+  let entries;
+  try {
+    entries = await fsp.readdir(dir, { withFileTypes: true });
+  } catch {
+    return { sessions: 0, latestMs: null, truncated: false };
+  }
+  const dirs = entries.filter((entry) => entry.isDirectory());
+  let sessions = 0;
+  let latestMs = 0;
+  let truncated = false;
+  for (const entry of dirs) {
+    if (sessions >= limit) {
+      truncated = true;
+      break;
+    }
+    const logFile = path.join(dir, entry.name, LOG_FILE);
+    let stat;
+    try {
+      stat = await fsp.stat(logFile);
+    } catch {
+      continue;
+    }
+    sessions += 1;
+    if (stat.mtimeMs > latestMs) latestMs = stat.mtimeMs;
+  }
+  return { sessions, latestMs: latestMs > 0 ? latestMs : null, truncated };
+}
+
+/**
  * 创建历史读取器（绑定工作区）。
  * @param {{sessionsRoot: string, workspacePath: string, maxSessions?: number, maxMessages?: number}} input
  */

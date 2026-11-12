@@ -12,23 +12,14 @@ import CompassTab from "./CompassTab.js";
 import { CompassApi } from "./api.js";
 import { sessionLinkState } from "./pointer-view.js";
 import { jumpToTurn as jumpToTurnCore, resolveJumpTarget } from "./turn-jump.js";
+import { ensureStyles, installStyles } from "./styles-install.js";
 import styles from "./styles.css?raw";
 
 export const inject = ["slots", "sidebarRightTabs", "sessions", "workspaces", "uiWorkspace", "sidebarRight"];
 
-const STYLE_ID = "dsh-taskbearing-css";
-
-function installStyles() {
-  const existing = document.getElementById(STYLE_ID);
-  if (existing) {
-    existing.textContent = styles;
-    return () => existing.remove();
-  }
-  const el = document.createElement("style");
-  el.id = STYLE_ID;
-  el.textContent = styles;
-  document.head.appendChild(el);
-  return () => el.remove();
+/** 样式自愈：DSH client-modules 会认领无主 <style>，插件热替换/其它插件卸载时可能被连带删除。 */
+function ensurePanelStyles() {
+  return ensureStyles(document, styles);
 }
 
 /** 按 sessionId 反查工作区路径（绝对路径）；查不到返回 null。 */
@@ -70,7 +61,47 @@ function sessionStateContext(ctx) {
 }
 
 export function apply(ctx) {
-  ctx.effect(() => installStyles(), "dsh-taskbearing: styles");
+  ctx.effect(() => installStyles(document, styles), "dsh-taskbearing: styles");
+
+  /**
+   * 把一条用户消息发进当前会话（B-63 / v1.32）：未初始化空态的「回填历史会话」用。
+   * 通道（按可用性降级，全部失败才交给 UI 复制指令）：
+   *   1. `ctx.sessions.scope(sessionId).conversation.send(text)`（会话作用域内的 conversation 服务）；
+   *   2. `ctx.get("conversation").sendSession(session, text, [], "queue")`（会话对象层，绕过 scope 注入限制）；
+   * 任何不可用都如实返回原因 —— 不得静默、不得假装已发送（§8.21）。
+   */
+  async function sendPromptToSession(sessionId, text) {
+    const sessions = ctx.sessions;
+    let lastReason = "";
+    // 通道 1：会话作用域内直接取 conversation 服务
+    try {
+      const scope = typeof sessions?.scope === "function" ? sessions.scope(sessionId) : undefined;
+      if (scope) {
+        const conversation = scope.conversation;
+        if (conversation && typeof conversation.send === "function") {
+          await conversation.send(String(text));
+          return { ok: true, channel: "conversation.send" };
+        }
+      }
+    } catch (err) {
+      lastReason = err instanceof Error ? err.message : String(err);
+    }
+    // 通道 2：会话对象层 sendSession（不依赖 scope 注入）
+    try {
+      const conversation = typeof ctx.get === "function" ? ctx.get("conversation") : undefined;
+      const binding = typeof sessions?.binding === "function" ? sessions.binding(sessionId) : undefined;
+      const session = binding?.session;
+      if (conversation && typeof conversation.sendSession === "function" && session) {
+        const result = await conversation.sendSession(session, String(text), [], "queue");
+        if (result?.kind === "success") return { ok: true, channel: "conversation.sendSession" };
+        return { ok: false, reason: "会话拒绝接收这条消息（宿主返回 error）" };
+      }
+      if (!lastReason) lastReason = "宿主未提供会话发送服务（缺少 conversation 服务）";
+    } catch (err) {
+      lastReason = err instanceof Error ? err.message : String(err);
+    }
+    return { ok: false, reason: lastReason || "自动发送不可用" };
+  }
 
   ctx.effect(
     () =>
@@ -98,6 +129,10 @@ export function apply(ctx) {
           ...props,
           sessionId,
           projectRoot: workspacePathFor(ctx, sessionId),
+          // 样式自愈（B-63 补）：client-modules 认领无主 style 后可能被其它插件卸载连带删除
+          ensureStyles: ensurePanelStyles,
+          // 未初始化空态回填入口（B-63）：把固定回填指令作为用户消息发进当前会话
+          sendPrompt: (text) => sendPromptToSession(sessionId, text),
           // 追溯指针跳转（SP-9）：每次渲染按最新快照判定可用性
           getSessionLinkState: (pointerSessionId) => sessionLinkState(pointerSessionId, sessionStateContext(ctx)),
           openSession: (pointerSessionId) => {

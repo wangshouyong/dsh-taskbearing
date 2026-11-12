@@ -12,14 +12,24 @@ export class ApiError extends Error {
 }
 
 /**
- * 旧宿主降级（B-55，v1.24）：宿主进程未升级时新接口会返回未知路由（E_NOT_FOUND / HTTP 404）。
- * 转成用户可读的提示，避免裸错误码与「无限加载」。
+ * 旧宿主降级（B-55，v1.24）与未初始化状态识别（B-63，v1.32）：
+ * - 只有「未知路由」（`E_NOT_FOUND`，宿主进程未升级）才映射成「旧版宿主，缺少该接口」；
+ * - 工作区未初始化（`E_NOT_INITIALIZED`，host 同样用 HTTP 404）是**状态**不是故障，
+ *   必须原样带着 code 抛给上层，由面板进入「暂无数据」空态（§8.21），不得误报旧宿主；
+ * - 无 code 的裸 404 视为路由层未实现（旧宿主），保留可读提示。
  * @param {{code?: string, message?: string}} error
  * @param {number} status
  */
 export function describeApiError(error, status) {
   const code = error?.code ?? "";
-  if (code === "E_NOT_FOUND" || status === 404) {
+  if (code === "E_NOT_INITIALIZED") {
+    return {
+      code: "E_NOT_INITIALIZED",
+      message: "任务板未初始化（暂无数据）",
+      details: error?.details
+    };
+  }
+  if (code === "E_NOT_FOUND" || (status === 404 && !code)) {
     return {
       code: "E_HOST_OUTDATED",
       message: "当前 DSH 是旧版宿主，缺少该接口；重启 DSH 后即可使用。",
@@ -67,6 +77,11 @@ export const CompassApi = {
       `/api/compass/session-turn${qs({ cwd, session: params?.session, turn: params?.turn, at: params?.at })}`
     ),
   tree: (cwd, ifmtime) => fetchJson(`/api/compass/tree${qs({ cwd, ifmtime })}`),
+  /**
+   * 无板面数据时的历史会话摘要（B-63，v1.32）：只读，只列会话目录 + stat。
+   * 宿主较旧（缺该路由）时抛 E_HOST_OUTDATED，由空态降级为「无法读取历史会话摘要」。
+   */
+  historySummary: (cwd) => fetchJson(`/api/compass/history-summary${qs({ cwd })}`),
   detail: (cwd, id) => fetchJson(`/api/compass/detail${qs({ cwd, id })}`),
   saveNote: (cwd, id, content, sessionId) =>
     fetchJson("/api/compass/note", {

@@ -33,6 +33,10 @@
 - **轮次与追溯可信**：轮次来源三级——宿主 `turn/start` 事件 → 会话日志还原 → 留空，**绝不按消息条数猜**；点击追溯记录前用会话日志核验轮次（旧数据写错的轮次按 `at` 还原），子代理会话自动跳到**父会话**对应轮次。
 - **会话可用性核验**：客户端会话列表看不到的历史会话，按会话日志存在性核验（不再误报「会话不可用」）。
 - **健康自检**：`compass_status.health` 机械暴露疑似重复任务、已执行但没有详情、父链陈旧（子节点详情比祖先新）。
+- **旧会话暂无数据空态**：插件安装前的旧会话（工作区还没有任务板）不再显示「读取失败/旧版宿主」，而是识别本工作区历史会话数，给「回填历史会话 / 暂不回填」两个选择——**不点不写盘、不发 AI 指令**；回填时 AI 走 `compass_init → compass_import(preview) → apply`，原话仍由插件逐字取回。
+- **详情与面板自动刷新**：AI 刚落板的详情/追溯链在已打开的详情弹窗里自动更新（你正在编辑备注时不覆盖草稿）；面板切回立即刷新，不用关掉重开。
+- **轮次跳转真的会滚过去**：点「跳到第 N 轮」会走宿主自己的轮次导航加载历史，再直接把聊天滚动容器滚到目标轮次并高亮；随后复核目标是否真的进入视口，失败会如实提示「已高亮但未能滚动」，不再出现「提示已跳转、也高亮，但画面没动」的假成功。
+- **面板健壮性**：样式显式声明归属并能在被宿主热替换连带删除后 ≤2s 自愈；client bundle 原子写，避免热加载读到半截文件。
 - **生命周期管理**：设置页列出本机全部任务板数据，检测原始路径已失效（项目被删/移动），支持手动清理；**不是看板切换器**。
 - **数据本地化**：全部数据存 `$DSH_HOME/storages/compass/<工作区名>-<hash>/`，无网络上报。
 
@@ -60,7 +64,7 @@
    npm install github:wangshouyong/dsh-taskbearing
    # 方式二：下载 GitHub Release 的 tarball 后本地安装
    #   https://github.com/wangshouyong/dsh-taskbearing/releases
-   npm install ./dsh-taskbearing-0.1.0.tgz
+   npm install ./dsh-taskbearing-0.1.1.tgz
    # 或开发期本地链接（Windows junction / Unix symlink）
    #   <profile>/node_modules/dsh-taskbearing -> 本仓库路径
    ```
@@ -114,7 +118,7 @@ compass_update   (task_ids/exec_state/pointer_note)  # 推进状态
 
 ```bash
 npm install          # 仅构建 client 需要 devDependency: vite
-node --test          # 全部单元测试（当前 251 个）
+node --test          # 全部单元测试（当前 274 个）
 npm run build:client # 构建 client facet → lib/client.js
 ```
 
@@ -153,3 +157,4 @@ docs/        设计文档（philosophy / schema-v2 / ui-design）
 ## License
 
 MIT License。见 [LICENSE](LICENSE)。
+

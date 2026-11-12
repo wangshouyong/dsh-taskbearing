@@ -1,5 +1,6 @@
 /**
- * /api/compass/* 数据路由（只读 tree/details、只写 note.md / ui-state.json / _ui.json）。
+ * /api/compass/* 数据路由（只读 tree/details/baseline/workspaces/session-links/session-turn/history-summary、
+ * 只写 note.md / ui-state.json / _ui.json）。
  * 安全边界（C-4）：写路径白名单，拒绝写 tree.json 与 details/<id>.md；cwd 必须绝对路径。
  */
 
@@ -14,7 +15,7 @@ import { resolveWorkspacePath } from "../core/paths.js";
 import { Store } from "../core/store.js";
 import { findRequirement, parseBaseline } from "../core/baseline.js";
 import { computeBoardStatus } from "./board-status.js";
-import { findSessionLogFile, isSessionId, readSessionMeta, resolveTurnForJump } from "./history.js";
+import { findSessionLogFile, isSessionId, readSessionMeta, resolveTurnForJump, summarizeWorkspaceSessions } from "./history.js";
 import { removeRuleBlock } from "./rules.js";
 
 const WORKSPACE_ID_RE = /^[A-Za-z0-9._-]{1,128}$/;
@@ -362,6 +363,25 @@ export function registerCompassRoutes(webServer, deps) {
     });
   }
 
+  /**
+   * GET /api/compass/history-summary?cwd=（B-63 / v1.32，只读）：
+   * 面板在「暂无数据」空态判断是「插件安装前的旧会话」还是「全新工作区」。
+   * 只列会话目录 + stat（不解压日志）；无 sessionsRoot 的宿主明确降级为 unavailable，不报错阻塞面板。
+   */
+  async function handleHistorySummary(url) {
+    const cwd = normalizeCwd(url.searchParams.get("cwd"));
+    if (!sessionsRoot) {
+      return { available: false, sessions: 0, latest_at: null, truncated: false };
+    }
+    const summary = await summarizeWorkspaceSessions({ sessionsRoot, workspacePath: cwd });
+    return {
+      available: true,
+      sessions: summary.sessions,
+      latest_at: summary.latestMs ? new Date(summary.latestMs).toISOString() : null,
+      truncated: summary.truncated
+    };
+  }
+
   /** 统计树节点与状态分布（A14 多工作区总览用；纯机械计数）。 */
   function summarizeTree(tree) {
     const summary = {
@@ -547,6 +567,7 @@ export function registerCompassRoutes(webServer, deps) {
       if (method === "GET" && sub === "/status") return send(res, 200, await handleStatus(url));
       if (method === "GET" && sub === "/session-links") return send(res, 200, await handleSessionLinks(url));
       if (method === "GET" && sub === "/session-turn") return send(res, 200, await handleSessionTurn(url));
+      if (method === "GET" && sub === "/history-summary") return send(res, 200, await handleHistorySummary(url));
       if (method === "GET" && sub === "/workspaces") return send(res, 200, await handleWorkspaces(url));
       if (method === "POST" && sub === "/workspaces/remove") return send(res, 200, await handleRemoveWorkspace(await readBody(req)));
       if (method === "POST" && sub === "/rules/remove") return send(res, 200, await handleRemoveRules());

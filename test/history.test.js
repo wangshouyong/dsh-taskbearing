@@ -11,6 +11,7 @@ import {
   extractUserMessages,
   listWorkspaceSessions,
   readSessionUserMessages,
+  summarizeWorkspaceSessions,
   workspaceSessionKey
 } from "../src/host/history.js";
 
@@ -124,4 +125,40 @@ test("readSessionUserMessages：注入消息被 source 过滤，不混入原话"
     messages.map((message) => message.text),
     ["把 PPT 里的图变成能拖顶点的形状", "另外矩形也要能拖"]
   );
+});
+
+test("summarizeWorkspaceSessions：只列目录 + stat，计数/最近时间/截断（B-63）", async (t) => {
+  const sessionsRoot = await fs.mkdtemp(path.join(os.tmpdir(), "compass-summary-"));
+  t.after(() => fs.rm(sessionsRoot, { recursive: true, force: true }));
+  const workspacePath = path.join("D:", "work", "summary");
+  const key = workspaceSessionKey(workspacePath);
+
+  // 无目录 ⇒ 0（不抛错）
+  const none = await summarizeWorkspaceSessions({ sessionsRoot, workspacePath });
+  assert.deepEqual(none, { sessions: 0, latestMs: null, truncated: false });
+
+  await writeSessionLog(path.join(sessionsRoot, key, "session-a", "session.v4.jsonl.zstd"), makeEvents(), 1);
+  await writeSessionLog(path.join(sessionsRoot, key, "session-b", "session.v4.jsonl.zstd"), makeEvents(), 1);
+  // 没有日志的会话目录不计
+  await fs.mkdir(path.join(sessionsRoot, key, "session-broken"), { recursive: true });
+
+  const both = await summarizeWorkspaceSessions({ sessionsRoot, workspacePath });
+  assert.equal(both.sessions, 2);
+  assert.equal(both.truncated, false);
+  assert.equal(typeof both.latestMs, "number");
+  assert.ok(both.latestMs > 0);
+
+  // 上限触发截断标记（不改变「只 stat」的事实）
+  const limited = await summarizeWorkspaceSessions({ sessionsRoot, workspacePath, limit: 1 });
+  assert.equal(limited.sessions, 1);
+  assert.equal(limited.truncated, true);
+
+  // 旧宿主无会话根时返回 0 而不是抛错（调用方降级为「无法读取历史会话摘要」）
+  const emptyRoot = await fs.mkdtemp(path.join(os.tmpdir(), "compass-summary-empty-"));
+  t.after(() => fs.rm(emptyRoot, { recursive: true, force: true }));
+  assert.deepEqual(await summarizeWorkspaceSessions({ sessionsRoot: emptyRoot, workspacePath }), {
+    sessions: 0,
+    latestMs: null,
+    truncated: false
+  });
 });

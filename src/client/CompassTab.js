@@ -6,6 +6,7 @@
 
 import * as React from "react";
 import { CompassApi, ApiError } from "./api.js";
+import { BACKFILL_PROMPT, INIT_PROMPT, describeUninitialized } from "./uninitialized.js";
 import {
   areRowPropsEqual,
   badgesFor,
@@ -546,8 +547,8 @@ function TreeView({ rows, expanded, onToggle, onOpenDetail, currentSessionId, no
   );
 }
 
-/** 空态 / 错误态。 */
-function EmptyState({ kind, message, hint, onRetry, onCopyHint, retryLabel = "重试" }) {
+/** 空态 / 错误态。actions 可选：[{label, onClick, primary, disabled}]（B-63 暂无数据空态用）。 */
+function EmptyState({ kind, message, hint, onRetry, onCopyHint, retryLabel = "重试", actions }) {
   return h(
     "div",
     { className: "empty-state" },
@@ -556,7 +557,7 @@ function EmptyState({ kind, message, hint, onRetry, onCopyHint, retryLabel = "�
       "div",
       { className: "empty-title" },
       {
-        uninitialized: "任务板尚未初始化",
+        uninitialized: "任务板暂无数据",
         empty: "任务板还是空的",
         search: "无匹配",
         loading: "加载中",
@@ -568,6 +569,19 @@ function EmptyState({ kind, message, hint, onRetry, onCopyHint, retryLabel = "�
     h(
       "div",
       { className: "empty-actions" },
+      ...(Array.isArray(actions) ? actions : []).map((action, index) =>
+        h(
+          "button",
+          {
+            key: `${action.label}-${index}`,
+            type: "button",
+            className: `btn${action.primary ? " primary" : ""}`,
+            disabled: action.disabled === true,
+            onClick: action.onClick
+          },
+          action.label
+        )
+      ),
       onRetry ? h("button", { type: "button", className: "btn", onClick: onRetry }, retryLabel) : null,
       onCopyHint ? h("button", { type: "button", className: "btn", onClick: onCopyHint }, "复制提示") : null
     )
@@ -937,6 +951,12 @@ export function CompassTab(props) {
   const [tree, setTree] = useState(null);
   const [mtime, setMtime] = useState(null);
   const [initialized, setInitialized] = useState(false);
+  // B-63（v1.32）：暂无数据空态（不是错误态）：未初始化 + 历史会话摘要 + 回填指令发送状态
+  const [uninitialized, setUninitialized] = useState(false);
+  const [historyInfo, setHistoryInfo] = useState(null);
+  const [dismissedUninit, setDismissedUninit] = useState(false);
+  const [backfill, setBackfill] = useState({ status: "idle", reason: null, copied: false });
+  const [copyNotice, setCopyNotice] = useState(null);
   const [view, setView] = useState("current");
   const [rememberExpand, setRememberExpand] = useState(false);
   const [expanded, setExpanded] = useState({});
@@ -957,6 +977,13 @@ useEffect(() => {
   return () => window.clearInterval(timer);
 }, []);
 
+// 样式自愈（B-63 补）：DSH 0.2.0-rc.2 的 client-modules 会把「无主 <style>」认领给
+// 后物化的插件，那个插件一重载/卸载就把本插件样式连带删掉（cdp 插件同款故障）。
+// 挂载时补一次归属；轮询与 tab 可见时再补（≤2s 自愈），见下方 effects。
+useEffect(() => {
+  if (typeof props.ensureStyles === "function") props.ensureStyles();
+}, [props.ensureStyles]);
+
   // 详情节点从当前树实时取（树刷新后详情跟着更新；也避免 openDetail 依赖 tree 导致行回调不稳定）
   const detailNode = useMemo(() => (detailId && tree ? findNode(tree, detailId) : null), [detailId, tree]);
   const detailCollision = useMemo(
@@ -976,6 +1003,113 @@ useEffect(() => {
     setError({ message });
   }, []);
 
+  /** 板面可用：清空暂无数据空态（回填完成 / 轮询检测到 tree 后自动切换，§8.21）。 */
+  const markReady = useCallback(() => {
+    setUninitialized(false);
+    setInitialized(true);
+    setError(null);
+    setDismissedUninit(false);
+    setHistoryInfo(null);
+    setCopyNotice(null);
+    setBackfill((state) => (state.status === "idle" ? state : { status: "idle", reason: null, copied: false }));
+  }, []);
+
+  /**
+   * 暂无数据空态（B-63）：识别未初始化 → 拉只读历史会话摘要（旧会话判断）。
+   * 这是状态，不是错误：不 setError。
+   */
+  const markUninitialized = useCallback(async (targetCwd) => {
+    setError(null);
+    setInitialized(false);
+    setUninitialized(true);
+    setDismissedUninit(false);
+    setCopyNotice(null);
+    setBackfill({ status: "idle", reason: null, copied: false });
+    setHistoryInfo(null);
+    if (!targetCwd) return;
+    try {
+      const summary = await CompassApi.historySummary(targetCwd);
+      setHistoryInfo(summary && typeof summary === "object" ? summary : null);
+    } catch {
+      // 旧宿主缺路由 / 网络失败：摘要不可用不阻塞空态，文案走「无法读取历史会话摘要」分支
+      setHistoryInfo(null);
+    }
+  }, []);
+
+  /** 复制固定指令（回填 / 初始化）：给可见反馈，失败也要说清楚（D-12 不静默）。 */
+  const copyInstruction = useCallback(async (text, label) => {
+    let copied = false;
+    try {
+      await navigator.clipboard?.writeText?.(text);
+      copied = true;
+    } catch {
+      copied = false;
+    }
+    setCopyNotice(copied ? `${label}已复制到剪贴板` : "复制失败，请手动复制");
+    window.setTimeout(() => setCopyNotice(null), 2500);
+    return copied;
+  }, []);
+
+  /**
+   * 把固定指令发进当前会话（经宿主 conversation 服务）。
+   * 成功 ⇒「已发送」态；不可用/失败 ⇒ 复制指令 + 可见原因（不静默、不假装成功）。
+   */
+  const sendInstruction = useCallback(
+    async (text) => {
+      setBackfill((state) => ({ ...state, status: "sending", reason: null, copied: false }));
+      setCopyNotice(null);
+      let result = null;
+      try {
+        result = typeof props.sendPrompt === "function" ? await props.sendPrompt(text) : null;
+      } catch (err) {
+        result = { ok: false, reason: err instanceof Error ? err.message : String(err) };
+      }
+      if (result?.ok === true) {
+        setBackfill({ status: "sent", reason: null, copied: false });
+        return;
+      }
+      const reason =
+        typeof result?.reason === "string" && result.reason.trim() ? result.reason.trim() : "自动发送不可用";
+      const copied = await copyInstruction(text, "回填指令");
+      setBackfill({ status: "fallback", reason, copied });
+    },
+    [copyInstruction, props.sendPrompt]
+  );
+
+  /** 空态刷新：先试 tree（回填可能已完成），仍无数据则重拉历史摘要；不重置已发送状态。 */
+  const refreshUninitialized = useCallback(async () => {
+    if (!cwd) return;
+    try {
+      const data = await CompassApi.tree(cwd);
+      if (data && data.changed !== false && data.tree) {
+        setTree(data.tree);
+        setMtime(data.mtimeMs);
+        markReady();
+        return;
+      }
+    } catch {
+      // 仍未初始化：继续刷新摘要
+    }
+    try {
+      const summary = await CompassApi.historySummary(cwd);
+      setHistoryInfo(summary && typeof summary === "object" ? summary : null);
+    } catch {
+      setHistoryInfo(null);
+    }
+  }, [cwd, markReady]);
+
+  const onUninitializedAction = useCallback(
+    (actionId) => {
+      if (actionId === "backfill") void sendInstruction(BACKFILL_PROMPT);
+      else if (actionId === "init") void sendInstruction(INIT_PROMPT);
+      else if (actionId === "dismiss") setDismissedUninit(true);
+      else if (actionId === "refresh") void refreshUninitialized();
+      else if (actionId === "copy") void copyInstruction(BACKFILL_PROMPT, "回填指令");
+      else if (actionId === "copy-init") void copyInstruction(INIT_PROMPT, "初始化提示");
+    },
+    [copyInstruction, refreshUninitialized, sendInstruction]
+  );
+
   const loadTree = useCallback(
     async (targetCwd, opts = {}) => {
       if (!targetCwd) return;
@@ -984,14 +1118,18 @@ useEffect(() => {
         if (data.changed === false) return;
         setTree(data.tree);
         setMtime(data.mtimeMs);
-        setInitialized(true);
-        setError(null);
+        markReady();
         if (!opts.keepDirty) setDirty(false);
       } catch (err) {
+        // 未初始化是状态而非故障（B-63）：进入暂无数据空态，不显示「读取失败」
+        if (err instanceof ApiError && err.code === "E_NOT_INITIALIZED") {
+          await markUninitialized(targetCwd);
+          return;
+        }
         fail(err);
       }
     },
-    [fail]
+    [fail, markReady, markUninitialized]
   );
 
   // 初始化：拿当前工作区（优先用宿主传入的 projectRoot）→ 读偏好 → 读 UI 状态 → 拉树
@@ -1017,6 +1155,11 @@ useEffect(() => {
         setView(normalizedPrefs.view);
         setRememberExpand(uiState?.rememberExpand === true);
         setExpanded(uiState?.rememberExpand === true ? uiState?.expanded ?? {} : {});
+        // B-63：/current 明确未初始化 ⇒ 直接进入暂无数据空态（不请求 tree，避免把 404 当故事）
+        if (current.initialized === false) {
+          await markUninitialized(current.cwd);
+          return;
+        }
         await loadTree(current.cwd);
         const status = await CompassApi.status(current.cwd, props.sessionId).catch(() => null);
         if (!cancelled && status) setBoardStatus(status);
@@ -1027,13 +1170,15 @@ useEffect(() => {
     return () => {
       cancelled = true;
     };
-  }, [fail, loadTree]);
+  }, [fail, loadTree, markUninitialized]);
 
   // 轮询
   useEffect(() => {
     if (!cwd) return undefined;
     const timer = window.setInterval(() => {
       if (!shouldPoll({ tabVisible, docVisible: document.visibilityState === "visible", editing })) return;
+      // 样式自愈：每次轮询确认本插件 <style> 仍存在且带归属标记（丢失则当场补回）
+      if (typeof props.ensureStyles === "function") props.ensureStyles();
       void CompassApi.status(cwd, props.sessionId)
         .then((status) => setBoardStatus(status))
         .catch(() => {});
@@ -1046,14 +1191,16 @@ useEffect(() => {
           else {
             setTree(data.tree);
             setMtime(data.mtimeMs);
+            // 回填完成后自动切回列表（B-63 / §8.7 未初始化期间保持轮询）
+            markReady();
           }
         } catch {
-          // 轮询失败不打断；下次再试
+          // 轮询失败不打断；未初始化时 404 属预期（§8.21）
         }
       })();
     }, POLL_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [cwd, mtime, editing, tabVisible, props.sessionId]);
+  }, [cwd, mtime, editing, tabVisible, props.sessionId, markReady, props.ensureStyles]);
 
   // 可见性恢复立即刷新
   useEffect(() => {
@@ -1127,6 +1274,42 @@ useEffect(() => {
     },
     [cwd, fail]
   );
+
+  // 详情自动跟随板面更新（v1.32 / B-63 补）：弹窗打开期间 tree mtime 变化 ⇒ 重拉 AI 详情。
+  // 否则 AI 刚落盘的详情/追溯链要等用户关掉再打开才看得到（会被误认为「校验没生效/详情被绕过」）。
+  // 用户正在编辑备注（dirty / saving）时保留草稿，不拿服务端内容覆盖输入。
+  useEffect(() => {
+    if (!detailId || !cwd || mtime === null || mtime === undefined) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await CompassApi.detail(cwd, detailId);
+        if (cancelled) return;
+        setDetail(data);
+        setNoteState((state) =>
+          state.status.state === "dirty" || state.status.state === "saving"
+            ? state
+            : { text: data.note ?? "", status: { state: "idle" } }
+        );
+      } catch {
+        // 刷新失败不打断阅读；下次板面变化再试（关闭重开也可）
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [cwd, detailId, mtime]);
+
+  // 面板重新可见时立即刷新一次（不等 2s 轮询）：后台/其它 tab 期间的变化切回即时可见。
+  const tabVisibleRef = useRef(null);
+  useEffect(() => {
+    const wasVisible = tabVisibleRef.current;
+    tabVisibleRef.current = tabVisible;
+    if (tabVisible) {
+      if (typeof props.ensureStyles === "function") props.ensureStyles();
+      if (wasVisible === false && cwd) void loadTree(cwd, { ifmtime: mtime ?? undefined });
+    }
+  }, [tabVisible, cwd, loadTree, mtime, props.ensureStyles]);
 
   const saveTimer = useRef(0);
   const onNoteChange = useCallback(
@@ -1232,6 +1415,35 @@ useEffect(() => {
       "div",
       { className: "dsh-compass-root", "data-theme": theme, ref: rootRef },
       h(EmptyState, { kind: "loading", message: "加载任务板…" })
+    );
+  }
+
+  // 暂无数据（B-63 / §8.21）：旧会话识别 + 回填与否由用户决定；不是错误态
+  if (uninitialized) {
+    const description = describeUninitialized({ history: historyInfo, dismissed: dismissedUninit, backfill });
+    return h(
+      "div",
+      { className: "dsh-compass-root", "data-theme": theme, ref: rootRef },
+      h(EmptyState, {
+        kind: "uninitialized",
+        message: description.message,
+        hint: copyNotice ?? description.hint,
+        actions: description.actions.map((action) => ({
+          label: action.label,
+          primary: action.primary === true,
+          disabled: action.disabled === true,
+          onClick: () => onUninitializedAction(action.id)
+        }))
+      }),
+      h(StatusBar, {
+        workspaceLabel: workspace.cwd ? workspace.cwd.split(/[\\/]/).filter(Boolean).pop() : null,
+        lastUpdated: null,
+        pollingOn: shouldPoll({ tabVisible, docVisible: document.visibilityState === "visible", editing }),
+        dirty: false,
+        boardBehind: 0,
+        blocked: 0,
+        onRefresh: () => void refreshUninitialized()
+      })
     );
   }
 

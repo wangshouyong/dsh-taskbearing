@@ -32,6 +32,10 @@ Design principle: **judgement stays with the AI; the plugin only enforces format
 - **Trustworthy turns & traceability**: turn comes from three sources — host `turn/start` event → current session log → empty; **it never guesses from message counts**. Before jumping, the plugin verifies the turn against the session log (legacy wrong turns are restored from the authoritative `at` timestamp); subagent sessions jump to the corresponding turn of the **parent session**.
 - **Session availability verification**: historical sessions missing from the client session list are verified via the session log (no more false "session unavailable").
 - **Health self-check**: `compass_status.health` mechanically reports suspected duplicate tasks, executed nodes without details, and stale parent chains (child detail newer than its ancestors).
+- **"No data yet" empty state for old sessions**: a session created before the plugin existed (workspace has no board data yet) no longer shows "read failed / old host"; the panel detects the workspace's history sessions and offers **"backfill history"** / **"not now"** — nothing is written and no AI message is sent unless you click. Backfill runs `compass_init → compass_import(preview) → apply`, with original words still read verbatim by the plugin.
+- **Detail and panel auto-refresh**: details/traceability written by the AI while a detail dialog is open update automatically (your in-progress note draft is never overwritten); the panel refreshes immediately when it becomes visible again — no need to close and reopen.
+- **Turn jumps really scroll**: "jump to turn N" uses the host's own turn navigation to load history, then scrolls the chat scroller to the target and highlights it; it then verifies the target actually entered the viewport and says "highlighted but could not scroll" honestly instead of reporting "jumped, highlighted, but the view did not move".
+- **Panel robustness**: styles declare their owner and self-heal within ~2s if the host hot-reloads another plugin and deletes them; the client bundle is written atomically so hot reload never reads a half-written file.
 - **Lifecycle management**: the settings dialog lists all local board data, detects orphaned original paths (project moved/deleted) and allows manual cleanup; it is **not a workspace switcher**.
 - **Local-first data**: everything lives in `$DSH_HOME/storages/compass/<workspace-name>-<hash>/`; no network upload.
 
@@ -59,7 +63,7 @@ The plugin consists of a host facet and a client facet, loaded as a plugin of a 
    npm install github:wangshouyong/dsh-taskbearing
    # option 2: download the GitHub Release tarball and install locally
    #   https://github.com/wangshouyong/dsh-taskbearing/releases
-   npm install ./dsh-taskbearing-0.1.0.tgz
+   npm install ./dsh-taskbearing-0.1.1.tgz
    # or link locally during development (Windows junction / Unix symlink)
    #   <profile>/node_modules/dsh-taskbearing -> path to this repo
    ```
@@ -113,7 +117,7 @@ From then on, before finishing each turn the AI self-checks against the rules in
 
 ```bash
 npm install          # devDependency: vite (only needed to build the client)
-node --test          # full unit test suite (currently 251 tests)
+node --test          # full unit test suite (currently 274 tests)
 npm run build:client # build the client facet → lib/client.js
 ```
 
@@ -152,3 +156,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Run `node --test` before submitting and 
 ## License
 
 MIT License. See [LICENSE](LICENSE).
+

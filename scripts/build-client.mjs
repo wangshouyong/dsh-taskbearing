@@ -3,7 +3,7 @@
  * vite 解析顺序：环境变量 VITE_BIN → 仓库本地 node_modules/vite → 报错并提示安装。
  */
 import { existsSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rename, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,5 +38,10 @@ ${inner}
 	}
 });
 `;
-await writeFile(path.join(root, "lib", "client.js"), wrapped, "utf8");
-console.log("wrote lib/client.js (wrapped)");
+// 原子写：页面/宿主可能正在热加载插件；直接 writeFile 会暴露半截 bundle（CSS/JS 截断）。
+// 先写临时文件再 rename，读者始终看到完整旧版或完整新版。
+const target = path.join(root, "lib", "client.js");
+const tmp = `${target}.tmp-${process.pid}-${Date.now()}`;
+await writeFile(tmp, wrapped, "utf8");
+await rename(tmp, target);
+console.log("wrote lib/client.js (wrapped, atomic)");

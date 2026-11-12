@@ -14,6 +14,9 @@ jobs:
   publish:
     name: npm publish
     runs-on: ubuntu-latest
+    env:
+      # 允许在尚未配置 npm 凭据时「跳过发布」而不是让 tag 发布一直红叉。
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -25,6 +28,10 @@ jobs:
       - name: gate (tests + doc mirrors)
         run: node --test && node scripts/check-docs-en.mjs
       - name: publish with provenance
+        if: env.NPM_TOKEN != ''
         run: npm publish --provenance --access public
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
+      - name: publish skipped (no NPM_TOKEN)
+        if: env.NPM_TOKEN == ''
+        run: echo "::notice::NPM_TOKEN 未配置，跳过 npm 发布；GitHub Release tarball 仍可安装。"

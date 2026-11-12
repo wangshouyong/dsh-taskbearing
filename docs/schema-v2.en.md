@@ -3,7 +3,7 @@
 [中文](schema-v2.md) | **English**
 
 > **Canonical version: Chinese.** This is a mirror translation of [`schema-v2.md`](schema-v2.md) and may lag behind it; in case of conflict the Chinese document wins. When the contract changes, change the Chinese document first and then sync this mirror.
-> Applies to version `0.1.0`. Internal iteration tags such as "v1.2x" only indicate when a rule was introduced; they are not public version numbers.
+> Applies to version `0.1.1`. Internal iteration tags such as "v1.2x" only indicate when a rule was introduced; they are not public version numbers.
 > For secondary development: data structures, field formats, tool APIs, status enums, migration/exchange formats.
 > For product behaviour, design philosophy and usage, see [philosophy.en.md](philosophy.en.md).
 > Current data formats: `meta.json` / `tree.json` schema `1`, `baseline.md` schema `2` (multi-line original-text escaping).
@@ -78,12 +78,13 @@ Path placeholders used in this document: `<DSH_HOME>` = DSH user data root; `<WO
 
 ### 3.6 Traceability & session-verification read-only endpoints
 
-The host facet exposes two read-only HTTP routes so the UI can verify facts **before** a traceability jump (they write no data):
+The host facet exposes three read-only HTTP routes so the UI can verify facts (they write no data):
 
 | Endpoint | Method | Description |
 |---|---|---|
 | `/api/compass/session-links?cwd=&ids=a,b,c` | GET | Verify session existence from session logs; returns `{sessions:[{session, exists, origin, openable, target_session}]}`; ≤ 50 ids per call. `origin="subagent"` marks a subagent session (not directly openable; `target_session` gives the parent session) |
 | `/api/compass/session-turn?cwd=&session=&turn=&at=` | GET | Verify / restore the real turn before a jump; returns `{exists, log_available, turn_count, requested_turn, turn, source, origin, target_session}`; `source ∈ exact / by-at / exact-no-at / parent-at` |
+| `/api/compass/history-summary?cwd=` | GET | Used by the panel's "no data yet" state: returns a history-session summary for the workspace `{available, sessions, latest_at, truncated}`. Scans session directories + `stat` only — no log decompression, no writes; `sessions>0` means this is an old workspace whose sessions predate the plugin |
 
 Rules:
 
@@ -91,6 +92,7 @@ Rules:
 2. `at` is authoritative: when `at` locates a turn, that turn wins (a legacy wrong `turn` is restored and marked `by-at`); when `at` is missing or cannot locate a turn, the `turn` is accepted only if it really exists in the log.
 3. Log unreadable ⇒ `log_available=false`; the UI must degrade explicitly and never guess a turn.
 4. Subagent session: return the parent session's `target_session` and the corresponding parent turn; when the parent log is missing, `turn=null`.
+5. `history-summary` does not depend on the board being initialized; when the host does not expose a session-log root it returns `available=false`, and the client degrades to "history summary unavailable" without blocking the empty state.
 
 ## 4 Storage design
 
@@ -412,7 +414,8 @@ Rules:
 | Error code | Meaning | Tools |
 |---|---|---|
 | `E_INVALID_ARG` | missing / wrong type / illegal value | all |
-| `E_NOT_INITIALIZED` | workspace not initialised (no `meta.json`) | require/plan/update/read/change/merge |
+| `E_NOT_INITIALIZED` | workspace not initialised (no `meta.json`). **A state, not a failure**: when `/tree` returns HTTP 404 with this code, the client must treat it as the "no data yet" empty state and must not show "old host" | require/plan/update/read/change/merge, routes |
+| `E_NOT_FOUND` | unknown route (the only signal that the host predates the client). Only this code is mapped by the client to "old host, missing endpoint" | route layer |
 | `E_PARENT_REQUIRED` | task created without `parent_id` (use `compass_require` for requirements) | plan |
 | `E_ORIGINAL_UNRESOLVED` | original text could not be retrieved (**warning**: write succeeded, original pending lock) | require/change |
 | `E_ORIGINAL_MISMATCH` | `original_text` does not match current-session user messages verbatim (**error**: nothing written; suggests using refs) | require/change |
@@ -759,6 +762,7 @@ Suggested action: verify the real workspace structure with terminal or file tool
 2. Any node whose detail is written this call (including "mark done", even when inheriting an old detail) ⇒ its **entire ancestor chain** must be summarised in the same `details` batch; missing any ancestor ⇒ `E_ANCESTOR_DETAIL_REQUIRED` (nothing written).
 3. A requirement about to aggregate to "done" ⇒ its detail must already satisfy the summary standard; otherwise `E_REQUIREMENT_DETAIL_REQUIRED`.
 4. `update` returns `rollups` (ancestor-summary ids written this call); `updated` includes ancestors.
+5. **"Inheriting an old detail" does not exempt the ancestor chain (enforced in code since v0.1.1)**: marking "done" without writing a detail this call (inheriting a qualifying old detail) still counts as a completion action, so the ancestor-chain summaries must be provided in the same batch; otherwise `E_ANCESTOR_DETAIL_REQUIRED`. This applies per task in batch calls too — inheritance must not become a backdoor around parent-chain summaries.
 
 **Backlog self-check (`compass_status.health`)**
 

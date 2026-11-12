@@ -3,6 +3,7 @@
  */
 
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { describeBundle, summarizeBundle } from "../src/client/bundle-view.js";
@@ -70,4 +71,13 @@ test("describeBundle：确认文案包含来源、时间、版本与内容计数
   assert.match(text, /导出时间：2026-11-11T12:00:00\.000Z/);
   assert.match(text, /插件版本：0\.1\.0/);
   assert.match(text, /2 需求 · 5 节点 · 2 个详情\/备注/);
+});
+
+test("client bundle：内联 CSS + data-plugin 归属标记（防 client-modules 认领后连带删除，B-63 补）", async () => {
+  const text = await readFile(new URL("../lib/client.js", import.meta.url), "utf8");
+  assert.ok(text.length > 1000, "bundle 已构建");
+  assert.ok(text.includes("dsh-taskbearing-css"), "样式 id 已打进 bundle");
+  assert.ok(text.includes("dsh-taskbearing"), "插件 id 已打进 bundle");
+  assert.match(text, /data-plugin/, "创建 <style> 时必须带 data-plugin 归属标记");
+  assert.ok(text.includes("作用域：面板"), "CSS 原文已内联（样式不丢）");
 });
