@@ -18,8 +18,8 @@ jobs:
       # 允许在尚未配置 npm 凭据时「跳过发布」而不是让 tag 发布一直红叉。
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
