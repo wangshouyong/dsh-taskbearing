@@ -100,7 +100,10 @@ test("规则 v1.35：瘦身后保留全部「发起时机/判断」规则，格�
 
   // 保留项（报错兜不住的发起时机/判断类）：逐条断言关键指令仍在
   assert.match(RULE_BODY, /compass_status/);
-  assert.match(RULE_BODY, /开工先规划/);
+  assert.match(RULE_BODY, /确认即落板/);
+  assert.match(RULE_BODY, /不以「是否开工」为前提/);
+  assert.match(RULE_BODY, /排期/);
+  assert.match(RULE_BODY, /待裁决/);
   assert.match(RULE_BODY, /完整任务树/);
   assert.match(RULE_BODY, /层级按从属组织/);
   assert.match(RULE_BODY, /after\/before/);

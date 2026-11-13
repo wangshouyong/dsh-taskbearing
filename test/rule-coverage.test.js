@@ -30,7 +30,7 @@ const SUMMARY = "验收范围：该节点下全部任务\n完成结论：已完�
  */
 const TIMING_SCENARIOS = [
   { id: "每轮自查", rule: 0, keywords: ["compass_status", "落板"] },
-  { id: "开工先规划", rule: 1, keywords: ["开工先规划", "compass_plan", "完整任务树"] },
+  { id: "确认即落板（含排期靠后）", rule: 1, keywords: ["确认即落板", "不以「是否开工」为前提", "排期", "待裁决", "after/before", "完整任务树"] },
   { id: "新需求先落需求", rule: 1, keywords: ["compass_require"] },
   { id: "层级从属", rule: 2, keywords: ["层级按从属组织", "compass_move"] },
   { id: "中间插入", rule: 2, keywords: ["after/before", "废弃重建"] },
