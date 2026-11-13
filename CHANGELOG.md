@@ -2,6 +2,19 @@
 
 本项目遵循语义化版本（SemVer）。
 
+## 0.1.3（2026-11-13）
+
+- **新增：回收站（契约 v1.33）**。一次性咨询/临时问题也会被写成需求，现在任务行上一个垃圾桶按钮就能把它丢出去，又能捡回来：
+  - 节点上的**独立删除标记 `trashedAt`**，与执行态/裁决态完全解耦——不要求理由、不改状态、不写追溯链；标记只落在被丢弃的节点上，整棵子树由祖先推导隐藏（还原不误伤单独丢弃过的子节点）；老数据没有该字段视为未丢弃，免迁移。
+  - 三条只写路由（与 AI 写共用 `Store.run` 锁与版本校验）：`POST /api/compass/discard`、`POST /api/compass/restore`、`POST /api/compass/purge`（`confirm:"DELETE"` 二次确认）。
+  - 顶栏「回收站 (N)」抽屉：还原 / 彻底删除（行内二次确认，文案含连带后代数）/ 需求层显示「不可删除」（基线原话与追溯链是审计资产，只允许保留）。
+  - 彻底删除先整包备份到 `data/trash/<时间>-<id>.json`（保留 30 天，自动清理），备份失败即中止，不落半盘；被其它节点 `merged_into` 引用时拒绝删除（防断链）。
+  - 回收站节点从三视图/钉顶/搜索/机械计数/需求层聚合/健康自检全部消失，`compass_read` 也不返回；AI 对回收站节点写入返回 `E_TRASH_NOT_FOUND`（提示先在面板还原）。导出/导入完整保留 `trashedAt`。
+  - 新增错误码 `E_TRASH_NOT_FOUND` / `E_PURGE_FORBIDDEN`。
+  - 文档：`docs/schema-v2`（§3.7 回收站、tree 字段与不变量 9、错误码）、`docs/philosophy`（回收站 vs 已废弃的语义边界）、`docs/ui-design`（附录 F）、README 中英。
+- 门禁：`node --test` **288/288**（新增 14 条：核心标记/还原/级联/计数/聚合/导出导入/备份清理 + 三条路由的权限与备份删除校验）；真实浏览器 harness 走通「丢弃 → 抽屉 → 还原 → 二次确认彻底删除（备份生成、详情/备注文件删除）」。
+- 说明：本版运行时代码 = 0.1.2 + 回收站功能；npm 首发仍受账号冻结影响（见发布记录），GitHub 渠道不受影响。
+
 ## 0.1.2（2026-11-12）
 
 - 修复（仅测试夹具，运行时代码不变）：`test/routes.test.js` 写会话日志的夹具改为先用 `resolveWorkspacePath` 规范化工作区，再算 `workspaceSessionKey`——与路由同一规则。`windows-latest` 的临时目录含 8.3 短名（如 `RUNNER~1`）时，realpath 后路径与夹具不同，导致 `history-summary` 用例误报 `0 !== 2`、v0.1.1 的 Windows CI 门禁失败（Linux 与本地 Windows 均绿；发布 tarball 不含 `test/`，运行不受影响）。

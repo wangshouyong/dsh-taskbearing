@@ -749,3 +749,91 @@
   .dsh-compass-root .pinned-sep { display: none; }
   .dsh-compass-root .row-dead { display: none; }
 }
+
+/* ---------- 回收站（v1.33） ---------- */
+.dsh-compass-root .trash-entry { position: relative; }
+.dsh-compass-root .trash-entry.has-items { color: var(--compass-warn); }
+.dsh-compass-root .trash-count {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--compass-warn);
+  color: #fff;
+  font-size: 9px;
+  line-height: 14px;
+  text-align: center;
+  font-weight: 600;
+}
+
+.dsh-compass-root .row-discard-btn {
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  background: transparent;
+  color: var(--compass-muted);
+  cursor: pointer;
+  padding: 1px 4px;
+  border-radius: 5px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.dsh-compass-root .tree-row:hover .row-discard-btn { opacity: 1; }
+.dsh-compass-root .row-discard-btn:focus-visible { opacity: 1; outline: 2px solid var(--compass-accent); outline-offset: 1px; }
+.dsh-compass-root .row-discard-btn:hover { background: var(--compass-active); color: var(--compass-warn); }
+
+.dsh-compass-portal .trash-card .trash-body { display: flex; flex-direction: column; gap: 10px; overflow: auto; min-height: 0; }
+.dsh-compass-portal .trash-notice {
+  flex: none;
+  font-size: 12px;
+  color: var(--compass-fg);
+  background: var(--compass-secondary);
+  border-radius: var(--compass-radius-sm);
+  padding: 7px 10px;
+  word-break: break-all;
+}
+.dsh-compass-portal .trash-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 42px 12px;
+  color: var(--compass-muted);
+  text-align: center;
+}
+.dsh-compass-portal .trash-empty-title { font-size: 13px; color: var(--compass-fg); }
+.dsh-compass-portal .trash-empty .hint { font-size: 12px; line-height: 1.6; max-width: 280px; }
+.dsh-compass-portal .trash-list { display: flex; flex-direction: column; gap: 8px; }
+.dsh-compass-portal .trash-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 10px;
+  border: 1px solid var(--compass-border);
+  border-radius: var(--compass-radius);
+  background: var(--compass-card);
+}
+.dsh-compass-portal .trash-row:hover { border-color: var(--compass-border-strong); }
+.dsh-compass-portal .trash-row-title {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--compass-fg);
+  word-break: break-word;
+}
+.dsh-compass-portal .trash-row-meta {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--compass-muted);
+  line-height: 1.5;
+  word-break: break-word;
+}
+.dsh-compass-portal .trash-row-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.dsh-compass-portal .trash-row-actions .btn { padding: 4px 12px; font-size: 12px; }
+.dsh-compass-portal .trash-row-actions .btn.disabled-look { color: var(--compass-muted); }
+
+@container compass (max-width: 340px) {
+  .dsh-compass-portal .trash-row-actions { flex-wrap: wrap; justify-content: flex-start; }
+}

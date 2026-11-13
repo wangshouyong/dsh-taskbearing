@@ -14,6 +14,17 @@ import { assertId } from "../core/ids.js";
 import { resolveWorkspacePath } from "../core/paths.js";
 import { Store } from "../core/store.js";
 import { findRequirement, parseBaseline } from "../core/baseline.js";
+import { collectTrashed, pruneTrashed } from "../core/tree.js";
+import {
+  buildTrashBackup,
+  cleanupTrashBackups,
+  discardNodes,
+  inspectPurge,
+  normalizeTrashIds,
+  removeNode,
+  restoreNodes,
+  writeTrashBackup
+} from "../core/trash.js";
 import { computeBoardStatus } from "./board-status.js";
 import { findSessionLogFile, isSessionId, readSessionMeta, resolveTurnForJump, summarizeWorkspaceSessions } from "./history.js";
 import { removeRuleBlock } from "./rules.js";
@@ -273,6 +284,83 @@ export function registerCompassRoutes(webServer, deps) {
     return { ok: true, mtime: stat.mtimeMs };
   }
 
+  // ---------------------------------------------------------------- 回收站（v1.33）
+
+  /**
+   * POST /api/compass/discard（v1.33）：丢弃到回收站（打独立删除标记，连带整棵子树隐藏）。
+   * 不写追溯链、不要求理由、不改执行态/裁决态；可随时还原。
+   */
+  async function handleDiscard(body) {
+    const store = storeFor(body?.cwd);
+    const ids = normalizeTrashIds(body?.ids);
+    return store.run(async () => {
+      const tree = await store.readTree();
+      const at = new Date().toISOString();
+      const result = discardNodes(tree, ids, at);
+      await store.writeTree(tree);
+      return { ...result, at, trash_count: collectTrashed(tree).length };
+    });
+  }
+
+  /** POST /api/compass/restore（v1.33）：从回收站还原（清标记，原状态原样回来）。 */
+  async function handleRestore(body) {
+    const store = storeFor(body?.cwd);
+    const ids = normalizeTrashIds(body?.ids);
+    return store.run(async () => {
+      const tree = await store.readTree();
+      const result = restoreNodes(tree, ids);
+      await store.writeTree(tree);
+      return { ...result, trash_count: collectTrashed(tree).length };
+    });
+  }
+
+  /**
+   * POST /api/compass/purge（v1.33）：彻底删除（二次确认 confirm:"DELETE"）。
+   * 只允许任务/步骤；需求层与被 merged_into 引用的节点拒绝。
+   * 先整包备份到 data/.trash（保留 30 天）再删，失败即中止、不落半盘。
+   */
+  async function handlePurge(body) {
+    const store = storeFor(body?.cwd);
+    const id = assertId(String(body?.id ?? "").trim());
+    if (body?.confirm !== "DELETE") {
+      fail(CODES.INVALID_ARG, '彻底删除必须显式传 confirm: "DELETE"（二次确认，删除后只能从 data/.trash 备份手工恢复）');
+    }
+    return store.run(async () => {
+      const tree = await store.readTree();
+      const info = inspectPurge(tree, id);
+      /** @type {Record<string, {md: string, note: string}>} */
+      const details = {};
+      for (const nodeId of info.ids) {
+        const [md, note] = await Promise.all([store.readDetail(nodeId), store.readNote(nodeId)]);
+        if (md !== "" || note !== "") details[nodeId] = { md, note };
+      }
+      const backup = buildTrashBackup({
+        node: info.node,
+        ids: info.ids,
+        tree,
+        workspaceId: store.workspaceId,
+        pluginVersion,
+        details,
+        now: new Date().toISOString()
+      });
+      // 备份成功才动数据：备份失败 ⇒ E_WRITE_FAILED，树不删
+      const backupFile = await writeTrashBackup(store, backup);
+      const removed = removeNode(tree, id);
+      await store.writeTree(tree);
+      for (const nodeId of removed.ids) {
+        await fsp.rm(store.detailPath(nodeId), { force: true }).catch(() => {});
+        await fsp.rm(store.notePath(nodeId), { force: true }).catch(() => {});
+      }
+      await cleanupTrashBackups(store).catch(() => 0);
+      return {
+        purged: id,
+        descendants: Math.max(0, removed.ids.length - 1),
+        backup: path.relative(store.dataDir, backupFile).replace(/\\/g, "/"),
+        trash_count: collectTrashed(tree).length
+      };
+    });
+  }
+
   async function handleGetUiState(url) {
     const store = storeFor(url.searchParams.get("cwd"));
     const state = await readJsonFile(uiStatePath(store), { expanded: {}, rememberExpand: false });
@@ -383,7 +471,8 @@ export function registerCompassRoutes(webServer, deps) {
   }
 
   /** 统计树节点与状态分布（A14 多工作区总览用；纯机械计数）。 */
-  function summarizeTree(tree) {
+  function summarizeTree(rawTree) {
+    const tree = pruneTrashed(rawTree); // v1.33：回收站节点不计入任何统计
     const summary = {
       node_count: 0,
       requirement_count: 0,
@@ -581,6 +670,9 @@ export function registerCompassRoutes(webServer, deps) {
       }
       if (method === "POST" && sub === "/import") return send(res, 200, await handleImport(await readBody(req)));
       if (method === "POST" && sub === "/note") return send(res, 200, await handleNote(await readBody(req)));
+      if (method === "POST" && sub === "/discard") return send(res, 200, await handleDiscard(await readBody(req)));
+      if (method === "POST" && sub === "/restore") return send(res, 200, await handleRestore(await readBody(req)));
+      if (method === "POST" && sub === "/purge") return send(res, 200, await handlePurge(await readBody(req)));
       if (method === "POST" && sub === "/file-exists") return send(res, 200, await handleFileExists(await readBody(req)));
       if (method === "GET" && sub === "/ui-state") return send(res, 200, await handleGetUiState(url));
       if (method === "PUT" && sub === "/ui-state") return send(res, 200, await handlePutUiState(await readBody(req)));

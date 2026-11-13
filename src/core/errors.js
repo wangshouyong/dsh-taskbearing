@@ -60,7 +60,11 @@ export const CODES = Object.freeze({
   MIGRATE_SOURCE: "E_MIGRATE_SOURCE",
   MIGRATE_REF: "E_MIGRATE_REF",
   MIGRATE_ITEM_INVALID: "E_MIGRATE_ITEM_INVALID",
-  MIGRATE_ARCHIVE: "E_MIGRATE_ARCHIVE"
+  MIGRATE_ARCHIVE: "E_MIGRATE_ARCHIVE",
+  /** v1.33 回收站：还原/彻底删除的目标不在回收站里（或不可还原） */
+  TRASH_NOT_FOUND: "E_TRASH_NOT_FOUND",
+  /** v1.33 回收站：禁止彻底删除（需求层 / 被其它节点 merged_into 引用） */
+  PURGE_FORBIDDEN: "E_PURGE_FORBIDDEN"
 });
 
 /**

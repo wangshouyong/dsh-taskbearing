@@ -22,6 +22,7 @@ import {
   visibleRows,
   VIEWS
 } from "./board-view.js";
+import { collectTrashed, pruneTrashed } from "../core/tree.js";
 import { formatHandoff, requirementIdOf } from "./copy-format.js";
 import { describeBundle, summarizeBundle } from "./bundle-view.js";
 import { extractFileAnchors, fileAddressFor } from "./file-anchor.js";
@@ -312,8 +313,8 @@ function SettingsWorkspaces({ cwd, onImported }) {
   );
 }
 
-/** 顶部：分段视图 + 搜索 + 刷新/设置（v1.24：移除时间线入口；设置走 portal 模态，B-51）。 */
-function TopBar({ view, onView, query, onQuery, searching, matchCount, onRefresh, onOpenSettings }) {
+/** 顶部：分段视图 + 搜索 + 回收站 + 刷新/设置（v1.24 移除时间线；v1.33 加回收站入口）。 */
+function TopBar({ view, onView, query, onQuery, searching, matchCount, trashCount, onOpenTrash, onRefresh, onOpenSettings }) {
   return h(
     "div",
     { className: "topbar" },
@@ -353,6 +354,18 @@ function TopBar({ view, onView, query, onQuery, searching, matchCount, onRefresh
           }
         }),
         searching ? h("span", { className: "search-count" }, `${matchCount} 项`) : null
+      ),
+      h(
+        "button",
+        {
+          type: "button",
+          className: `icon-btn trash-entry${trashCount > 0 ? " has-items" : ""}`,
+          title: trashCount > 0 ? `回收站：${trashCount} 项` : "回收站（空）",
+          "aria-label": trashCount > 0 ? `回收站，${trashCount} 项` : "回收站",
+          onClick: onOpenTrash
+        },
+        h(Icon, { name: "trash" }),
+        trashCount > 0 ? h("span", { className: "trash-count" }, trashCount > 99 ? "99+" : String(trashCount)) : null
       ),
       h(
         "button",
@@ -448,7 +461,7 @@ function PinnedList({ items, onJump }) {
 }
 
 /** 清单行（B-40）：React.memo + 行签名，未变行跳过重渲染。 */
-const TreeRow = React.memo(function TreeRow({ row, expanded, onToggle, onOpenDetail, depth, currentSessionId, nowMs }) {
+const TreeRow = React.memo(function TreeRow({ row, expanded, onToggle, onOpenDetail, onDiscard, depth, currentSessionId, nowMs }) {
   if (typeof window !== "undefined" && window.__DSH_COMPASS_PROFILE__) {
     // CDP 验收用行渲染计数（默认关闭，生产无副作用）
     window.__DSH_COMPASS_ROW_RENDERS__ = (window.__DSH_COMPASS_ROW_RENDERS__ ?? 0) + 1;
@@ -512,6 +525,20 @@ const TreeRow = React.memo(function TreeRow({ row, expanded, onToggle, onOpenDet
         "button",
         {
           type: "button",
+          className: "row-discard-btn",
+          title: "丢弃到回收站（可还原）",
+          "aria-label": `丢弃到回收站：${node.human_line}`,
+          onClick: (e) => {
+            e.stopPropagation();
+            onDiscard(node.id);
+          }
+        },
+        h(Icon, { name: "trash", size: 12 })
+      ),
+      h(
+        "button",
+        {
+          type: "button",
           className: "row-detail-btn",
           title: "详情",
           onClick: (e) => {
@@ -526,7 +553,7 @@ const TreeRow = React.memo(function TreeRow({ row, expanded, onToggle, onOpenDet
 }, areRowPropsEqual);
 
 /** 递归树。 */
-function TreeView({ rows, expanded, onToggle, onOpenDetail, currentSessionId, nowMs }) {
+function TreeView({ rows, expanded, onToggle, onOpenDetail, onDiscard, currentSessionId, nowMs }) {
   if (rows.length === 0) return null;
   return h(
     "div",
@@ -539,12 +566,133 @@ function TreeView({ rows, expanded, onToggle, onOpenDetail, currentSessionId, no
         expanded,
         onToggle,
         onOpenDetail,
+        onDiscard,
         depth: row.depth,
         currentSessionId,
         nowMs
       })
     )
   );
+}
+
+/** 回收站抽屉（v1.33）：列出已丢弃节点；可还原 / 彻底删除（需求层只允许保留，禁物理删除）。 */
+function TrashDrawer({ entries, busy, notice, onRestore, onPurge, onClose }) {
+  const [confirmId, setConfirmId] = React.useState(null);
+  useEffect(() => {
+    // 列表变化（还原/删除后）→ 收起未完成的二次确认，避免误删下一行
+    setConfirmId(null);
+  }, [entries.length]);
+  return h(
+    PortalDialog,
+    { variant: "drawer", onClose, label: "回收站", className: "trash-card" },
+    h(DialogHead, {
+      title: "回收站",
+      subtitle: entries.length > 0 ? `${entries.length} 项 · 丢弃不改状态，随时可还原` : "空 · 任务行上的垃圾桶按钮可把一次性任务丢进来",
+      onClose
+    }),
+    h(
+      "div",
+      { className: "modal-body trash-body" },
+      notice ? h("div", { className: "trash-notice", role: "status" }, notice) : null,
+      entries.length === 0
+        ? h(
+            "div",
+            { className: "trash-empty" },
+            h(Icon, { name: "inbox", size: 28 }),
+            h("div", { className: "trash-empty-title" }, "回收站是空的"),
+            h("div", { className: "hint" }, "任务行右侧的垃圾桶按钮：一次点击丢弃，整棵子树一起收起来，随时还原。")
+          )
+        : h(
+            "div",
+            { className: "trash-list" },
+            entries.map(({ node, path, descendants }) => {
+              const isRequirement = node.kind === "requirement";
+              const pending = confirmId === node.id;
+              return h(
+                "div",
+                { className: `trash-row${isRequirement ? " kind-requirement" : ""}`, key: node.id },
+                h(
+                  "div",
+                  { className: "trash-row-main" },
+                  h("div", { className: "trash-row-title", title: node.human_line }, node.human_line),
+                  h(
+                    "div",
+                    { className: "trash-row-meta" },
+                    isRequirement ? "需求" : node.kind === "task" ? "任务" : "步骤",
+                    path.length > 0 ? ` · ${path.join(" › ")}` : "",
+                    descendants > 0 ? ` · 含 ${descendants} 个后代` : "",
+                    ` · 丢弃于 ${formatTrashTime(node.trashedAt)}`
+                  )
+                ),
+                h(
+                  "div",
+                  { className: "trash-row-actions" },
+                  pending
+                    ? [
+                        h(
+                          "button",
+                          {
+                            key: "ok",
+                            type: "button",
+                            className: "btn danger",
+                            disabled: busy,
+                            onClick: () => {
+                              setConfirmId(null);
+                              onPurge(node.id);
+                            }
+                          },
+                          descendants > 0 ? `确认删除（含 ${descendants} 个后代）` : "确认删除"
+                        ),
+                        h(
+                          "button",
+                          { key: "cancel", type: "button", className: "btn", disabled: busy, onClick: () => setConfirmId(null) },
+                          "取消"
+                        )
+                      ]
+                    : [
+                        h(
+                          "button",
+                          {
+                            key: "restore",
+                            type: "button",
+                            className: "btn",
+                            disabled: busy,
+                            onClick: () => onRestore(node.id)
+                          },
+                          "还原"
+                        ),
+                        h(
+                          "button",
+                          {
+                            key: "purge",
+                            type: "button",
+                            className: `btn danger${isRequirement ? " disabled-look" : ""}`,
+                            disabled: busy || isRequirement,
+                            title: isRequirement
+                              ? "需求带着基线原话与追溯链，只能保留在回收站，不能彻底删除"
+                              : "彻底删除（先备份到 data/.trash，保留 30 天）",
+                            onClick: () => {
+                              if (!isRequirement) setConfirmId(node.id);
+                            }
+                          },
+                          isRequirement ? "不可删除" : "彻底删除"
+                        )
+                      ]
+                )
+              );
+            })
+          )
+    )
+  );
+}
+
+/** 回收站时间：ISO → 本地「MM-DD HH:mm」（非法输入不编造）。 */
+function formatTrashTime(value) {
+  const time = typeof value === "string" ? Date.parse(value) : NaN;
+  if (!Number.isFinite(time)) return "未知时间";
+  const date = new Date(time);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 /** 空态 / 错误态。actions 可选：[{label, onClick, primary, disabled}]（B-63 暂无数据空态用）。 */
@@ -968,6 +1116,10 @@ export function CompassTab(props) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [query, setQuery] = useState("");
+  // v1.33 回收站：抽屉开关 / 操作中 / 抽屉内可见提示（不切整面板错误态）
+  const [trashOpen, setTrashOpen] = useState(false);
+  const [trashBusy, setTrashBusy] = useState(false);
+  const [trashNotice, setTrashNotice] = useState(null);
   const [boardStatus, setBoardStatus] = useState(null);
 const [nowTick, setNowTick] = useState(() => Date.now());
   const [baselineCache, setBaselineCache] = useState({});
@@ -984,8 +1136,12 @@ useEffect(() => {
   if (typeof props.ensureStyles === "function") props.ensureStyles();
 }, [props.ensureStyles]);
 
+  // v1.33 回收站：常规视图/计数/搜索/钉顶只看「板上可见」的树；回收站抽屉单独列已丢弃项
+  const boardTree = useMemo(() => (tree ? pruneTrashed(tree) : null), [tree]);
+  const trashEntries = useMemo(() => (tree ? collectTrashed(tree) : []), [tree]);
+
   // 详情节点从当前树实时取（树刷新后详情跟着更新；也避免 openDetail 依赖 tree 导致行回调不稳定）
-  const detailNode = useMemo(() => (detailId && tree ? findNode(tree, detailId) : null), [detailId, tree]);
+  const detailNode = useMemo(() => (detailId && boardTree ? findNode(boardTree, detailId) : null), [detailId, boardTree]);
   const detailCollision = useMemo(
     () => (detailNode ? collisionOf(detailNode, props.sessionId) : null),
     [detailNode, props.sessionId]
@@ -1383,17 +1539,62 @@ useEffect(() => {
     void openDetail(node.id);
   }, [openDetail]);
 
+  // ---------------------------------------------------------------- 回收站（v1.33）
+  /** 回收站操作：成功写可见提示 + 刷新板面；失败把原因放在抽屉里，不切整面板错误态。 */
+  const runTrashAction = useCallback(
+    async (action, successNote) => {
+      if (!cwd) return;
+      setTrashBusy(true);
+      setTrashNotice(null);
+      try {
+        const result = await action();
+        setTrashNotice(typeof successNote === "function" ? successNote(result) : successNote);
+        await loadTree(cwd);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setTrashNotice(message);
+      } finally {
+        setTrashBusy(false);
+      }
+    },
+    [cwd, loadTree]
+  );
+
+  const discardNode = useCallback(
+    (id) => {
+      void runTrashAction(() => CompassApi.discard(cwd, [id]), "已丢进回收站（可在回收站还原）");
+    },
+    [cwd, runTrashAction]
+  );
+
+  const restoreTrash = useCallback(
+    (id) => {
+      void runTrashAction(() => CompassApi.restore(cwd, [id]), "已还原，状态保持丢弃前的样子");
+    },
+    [cwd, runTrashAction]
+  );
+
+  const purgeTrash = useCallback(
+    (id) => {
+      void runTrashAction(
+        () => CompassApi.purge(cwd, id),
+        (result) => (result?.backup ? `已彻底删除（备份：${result.backup}，保留 30 天）` : "已彻底删除")
+      );
+    },
+    [cwd, runTrashAction]
+  );
+
   const search = useMemo(
-    () => (tree ? searchRows(tree, view, expanded, query) : { rows: [], matchCount: 0, searching: false }),
-    [tree, view, expanded, query]
+    () => (boardTree ? searchRows(boardTree, view, expanded, query) : { rows: [], matchCount: 0, searching: false }),
+    [boardTree, view, expanded, query]
   );
   // 行签名（B-40）：只有签名变化的行会重渲染（TreeRow 的 React.memo 比较器）；撞车标记依赖当前会话
   const rows = useMemo(
     () => search.rows.map((row) => ({ ...row, signature: rowSignature(row, { currentSessionId: props.sessionId }) })),
     [search.rows, props.sessionId]
   );
-  const pinned = useMemo(() => (tree ? pinnedNodes(tree) : []), [tree]);
-  const execCounts = useMemo(() => (tree ? countTreeByExec(tree) : null), [tree]);
+  const pinned = useMemo(() => (boardTree ? pinnedNodes(boardTree) : []), [boardTree]);
+  const execCounts = useMemo(() => (boardTree ? countTreeByExec(boardTree) : null), [boardTree]);
 
   if (error) {
     return h(
@@ -1447,7 +1648,7 @@ useEffect(() => {
     );
   }
 
-  const detailPathTitles = detailNode ? buildPathTitles(tree, detailNode.id) : [];
+  const detailPathTitles = detailNode ? buildPathTitles(boardTree, detailNode.id) : [];
 
   return h(
     "div",
@@ -1459,15 +1660,23 @@ useEffect(() => {
       onQuery: setQuery,
       searching: search.searching,
       matchCount: search.matchCount,
+      trashCount: trashEntries.length,
+      onOpenTrash: () => {
+        setTrashNotice(null);
+        setTrashOpen(true);
+      },
       onRefresh: () => cwd && void loadTree(cwd),
       onOpenSettings: () => setSettingsOpen(true)
     }),
     h(PinnedList, { items: pinned, onJump: jumpTo }),
-    initialized && tree && (tree.root?.children?.length ?? 0) === 0
+    initialized && boardTree && (boardTree.root?.children?.length ?? 0) === 0
       ? h(EmptyState, {
           kind: "empty",
           message: "任务板还是空的。",
-          hint: "让 AI 用 compass_require 建第一条需求，再用 compass_plan 拆任务。",
+          hint:
+            trashEntries.length > 0
+              ? `板上没有可见任务，回收站里还有 ${trashEntries.length} 项（顶栏垃圾桶图标可还原）。`
+              : "让 AI 用 compass_require 建第一条需求，再用 compass_plan 拆任务。",
           onCopyHint: () => navigator.clipboard.writeText("请用 compass_require 建第一条需求，再用 compass_plan 拆任务。")
         })
       : initialized && search.searching && rows.length === 0
@@ -1479,7 +1688,15 @@ useEffect(() => {
             retryLabel: "清空搜索"
           })
         : initialized
-          ? h(TreeView, { rows, expanded, onToggle, onOpenDetail: openDetail, currentSessionId: props.sessionId, nowMs: nowTick })
+          ? h(TreeView, {
+              rows,
+              expanded,
+              onToggle,
+              onOpenDetail: openDetail,
+              onDiscard: discardNode,
+              currentSessionId: props.sessionId,
+              nowMs: nowTick
+            })
           : h(EmptyState, { kind: "loading", message: "加载任务板…" }),
     h(StatusBar, {
       workspaceLabel: workspace?.cwd ? workspace.cwd.split(/[\\/]/).filter(Boolean).pop() : null,
@@ -1503,6 +1720,19 @@ useEffect(() => {
             ? `data: ${workspace.dataDir}\n多窗口并发保护：已启用（写锁 + 版本校验）`
             : null,
           onClose: () => setSettingsOpen(false)
+        })
+      : null,
+    trashOpen
+      ? h(TrashDrawer, {
+          entries: trashEntries,
+          busy: trashBusy,
+          notice: trashNotice,
+          onRestore: restoreTrash,
+          onPurge: purgeTrash,
+          onClose: () => {
+            setTrashOpen(false);
+            setTrashNotice(null);
+          }
         })
       : null,
     detailId && detailNode

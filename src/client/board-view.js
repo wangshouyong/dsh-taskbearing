@@ -14,11 +14,21 @@ const PINNED_VERDICTS = new Set(["待裁决", "冲突"]);
 
 /** @param {any} node @param {string} view */
 export function isVisible(node, view) {
+  if (isTrashed(node)) return false; // 回收站节点永远不进常规视图（v1.33）
   const verdict = node.verdict_state ?? null;
   if (view === VIEW_ALL) return true;
   if (view === VIEW_CURRENT) return verdict === null || PINNED_VERDICTS.has(verdict);
   // active
   return (verdict === null || PINNED_VERDICTS.has(verdict)) && node.exec_state !== "已执行";
+}
+
+/**
+ * 回收站标记（v1.33）：与 core/tree.js 的 isTrashed 同义。
+ * 客户端自带一份纯函数，避免视图层依赖 core 模块（行过滤在渲染热路径上）。
+ * @param {any} node
+ */
+export function isTrashed(node) {
+  return typeof node?.trashedAt === "string" && node.trashedAt.length > 0;
 }
 
 /** @param {any} node */
@@ -254,7 +264,8 @@ export function areRowPropsEqual(prevProps, nextProps) {
   return (
     prevProps?.signature === nextProps?.signature &&
     prevProps?.onToggle === nextProps?.onToggle &&
-    prevProps?.onOpenDetail === nextProps?.onOpenDetail
+    prevProps?.onOpenDetail === nextProps?.onOpenDetail &&
+    prevProps?.onDiscard === nextProps?.onDiscard
   );
 }
 

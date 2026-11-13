@@ -26,8 +26,11 @@ import {
   findNode,
   flattenLite,
   isIsoTimestamp,
+  isTrashed,
+  pruneTrashed,
   syncRequirementExecStates
 } from "./tree.js";
+import { trashedAncestorOf } from "./trash.js";
 
 /**
  * @typedef {Object} CompassDeps
@@ -93,6 +96,30 @@ export function createCompass(deps) {
     };
     walk(tree.root);
     return ids;
+  }
+
+  /**
+   * v1.33 回收站：被丢弃的节点（或随父节点一起被丢弃）对 AI 不可写。
+   * 丢弃是面板侧的用户动作；AI 若拿到旧 id 写进来，给可读指引而不是静默改脏数据。
+   * @param {any} tree
+   * @param {string} id
+   * @returns {any} 节点
+   */
+  function assertWritable(tree, id, options = {}) {
+    const isParent = options.role === "parent";
+    const node = findNode(tree, id);
+    if (!node) {
+      if (isParent) fail(CODES.PARENT_NOT_FOUND, `父节点不存在：${id}`, { parent_id: id, missing: [id] });
+      fail(CODES.TASK_NOT_FOUND, `节点不存在：${id}`, { missing: [id] });
+    }
+    if (isTrashed(node) || trashedAncestorOf(tree, id)) {
+      fail(
+        CODES.TRASH_NOT_FOUND,
+        `节点 ${id} 在回收站里（面板已丢弃），AI 不可写入；请让用户在任务板「回收站」里还原后再操作`,
+        { id }
+      );
+    }
+    return node;
   }
 
   /**
@@ -392,10 +419,7 @@ export function createCompass(deps) {
     if (args.detail !== undefined) assertDetailPaths(String(args.detail));
 
     const tree = await store.readTree();
-    const parent = findNode(tree, String(parentId).trim());
-    if (!parent) {
-      fail(CODES.PARENT_NOT_FOUND, `父节点不存在：${String(parentId)}`, { parent_id: String(parentId) });
-    }
+    const parent = assertWritable(tree, String(parentId).trim(), { role: "parent" });
     if (parent.kind === KIND_PROJECT) {
       fail(CODES.INVALID_ARG, "project 根下不能直接建任务：请先用 compass_require 建需求");
     }
@@ -678,6 +702,7 @@ export function createCompass(deps) {
     const tree = await store.readTree();
     for (const id of ids) {
       if (!findNode(tree, id)) fail(CODES.TASK_NOT_FOUND, `节点不存在：${id}`, { missing: [id] });
+      assertWritable(tree, id);
     }
     // v1.28 / B-59：需求层执行状态由插件按子任务机械聚合，AI 不可手写
     if (hasExec) {
@@ -1201,10 +1226,8 @@ export function createCompass(deps) {
     const note = optionalNote(args.pointer_note, "pointer_note") ?? "移动节点";
 
     const tree = await store.readTree();
-    const source = findNode(tree, sourceId);
-    if (!source) fail(CODES.TASK_NOT_FOUND, `节点不存在：${sourceId}`, { missing: [sourceId] });
-    const parent = findNode(tree, parentId);
-    if (!parent) fail(CODES.PARENT_NOT_FOUND, `父节点不存在：${parentId}`, { parent_id: parentId });
+    const source = assertWritable(tree, sourceId);
+    const parent = assertWritable(tree, parentId, { role: "parent" });
     if (source.kind === KIND_PROJECT) fail(CODES.INVALID_ARG, "project 根节点不可移动");
     if (source.kind === KIND_REQUIREMENT) fail(CODES.INVALID_ARG, "需求只能挂在项目根下，不可移动");
     if (parent.kind === KIND_PROJECT) fail(CODES.INVALID_ARG, "任务不能挂到项目根下（请挂到需求或任务下）");
@@ -1232,7 +1255,8 @@ export function createCompass(deps) {
    */
   async function read(args = {}) {
     const scope = String(args.scope ?? "").trim();
-    if (scope === "tree") return store.readTree();
+    // v1.33：回收站节点不进 AI 上下文（视图/计数/搜索同理）；导入导出仍完整保留
+    if (scope === "tree") return pruneTrashed(await store.readTree());
     if (scope === "tree-lite") return flattenLite(await store.readTree());
     if (scope.startsWith("detail:")) {
       const id = scope.slice("detail:".length).trim();
@@ -1273,6 +1297,7 @@ export function createCompass(deps) {
     if (!findNode(tree, requirementId)) {
       fail(CODES.STORE_CORRUPT, `任务树中不存在需求 ${requirementId}，但基线要求它在（数据不一致）`);
     }
+    assertWritable(tree, requirementId);
 
     const original = await resolveOriginalInput(args, warnings);
     const label = appendVersion(model, requirementId, {
@@ -1316,6 +1341,8 @@ export function createCompass(deps) {
     if (source.kind === KIND_PROJECT || target.kind === KIND_PROJECT) {
       fail(CODES.INVALID_ARG, "project 根节点不参与合并");
     }
+    assertWritable(tree, sourceId);
+    assertWritable(tree, targetId);
 
     source.merged_into = targetId;
     source.pointers.push(pointer(note));

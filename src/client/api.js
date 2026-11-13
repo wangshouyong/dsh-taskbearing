@@ -96,6 +96,28 @@ export const CompassApi = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ cwd, paths })
     }),
+  /**
+   * 回收站（v1.33）：面板侧清理动作，打独立删除标记（不动执行态/裁决态）。
+   * discard = 丢弃（可还原）；restore = 还原；purge = 彻底删除（任务/步骤，二次确认）。
+   */
+  discard: (cwd, ids) =>
+    fetchJson("/api/compass/discard", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cwd, ids })
+    }),
+  restore: (cwd, ids) =>
+    fetchJson("/api/compass/restore", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cwd, ids })
+    }),
+  purge: (cwd, id) =>
+    fetchJson("/api/compass/purge", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cwd, id, confirm: "DELETE" })
+    }),
   getUiState: (cwd) => fetchJson(`/api/compass/ui-state${qs({ cwd })}`),
   putUiState: (cwd, state) =>
     fetchJson("/api/compass/ui-state", {

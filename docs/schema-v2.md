@@ -95,6 +95,34 @@
 4. 子代理会话：返回父会话 `target_session` 与父会话对应轮次；父会话日志缺失时 `turn=null`。
 5. `history-summary` 不依赖任务板是否已初始化；宿主未提供会话日志根目录时返回 `available=false`，客户端按「无法读取历史会话摘要」降级，不阻塞空态。
 
+### 3.7 回收站（v1.33：面板侧清理动作）
+
+一次性咨询/临时问题也会落成任务，需要能「扔掉、又能捡回来」。回收站是**面板侧的用户清理动作**，与裁决态「已废弃」是两件事：
+
+| | 裁决态「已废弃」 | 回收站标记 `trashedAt` |
+|---|---|---|
+| 谁能写 | AI 工具（`compass_update`） | 只有面板（用户点击） |
+| 要理由吗 | 要（`dead_reason` + `pointer_note`） | 不要 |
+| 会不会改状态 | 改 `verdict_state` | 不改任何状态 |
+| 进追溯链吗 | 进（pointers） | 不进 |
+| 可逆吗 | 复活需先回 `待裁决` | 随时一键还原，原状态不变 |
+
+**三条只写路由**（写操作持 `Store.run` 写锁，与 AI 写共用同一条事务与版本校验路径）：
+
+| 接口 | 方法 | body | 说明 |
+|---|---|---|---|
+| `/api/compass/discard` | POST | `{cwd, ids:[...]}` | 打删除标记。节点已在回收站（或祖先在）⇒ 计入 `skipped`，幂等不报错。返回 `{discarded, skipped, at, trash_count}` |
+| `/api/compass/restore` | POST | `{cwd, ids:[...]}` | 清标记。父节点仍在回收站 ⇒ `E_TRASH_NOT_FOUND`（`details.trashed_ancestor` 给出祖先 id），要求先还原祖先。返回 `{restored, skipped, trash_count}` |
+| `/api/compass/purge` | POST | `{cwd, id, confirm:"DELETE"}` | **彻底删除**。只允许任务/步骤；需求层 ⇒ `E_PURGE_FORBIDDEN`；被其它节点 `merged_into` 引用 ⇒ `E_PURGE_FORBIDDEN`；未丢弃 ⇒ `E_TRASH_NOT_FOUND`；缺 `confirm` ⇒ `E_INVALID_ARG`。先整包备份到 `data/trash/<时间>-<id>.json`（保留 30 天）再删树与详情/备注文件，备份失败即中止。返回 `{purged, descendants, backup, trash_count}` |
+
+规则：
+
+1. **标记只落在被丢弃的节点上**，子树由祖先推导为隐藏：还原时不需要批量清子节点，也不会误伤此前单独丢弃过的子节点。
+2. 回收站节点从**一切可见面**消失：三视图、钉顶、搜索、机械计数、需求层聚合、板面健康自检；`compass_read(tree/tree-lite)` 也不返回（AI 不可见）。
+3. AI 对回收站节点写入（`update/plan/move/merge/change`）⇒ `E_TRASH_NOT_FOUND`，提示用户先在面板还原。
+4. 导出/导入**完整保留** `trashedAt`（换机迁移不丢回收站）。
+5. 备份文件不在 schema 内（`data/trash/` 目录），30 天后自动清理；删空后不可从 UI 恢复，只能手工用备份文件。
+
 ## 4 存储设计
 
 ### 4.1 数据根与工作区定位
@@ -248,6 +276,7 @@ $DSH_HOME/storages/compass/<工作区名>-<hash>/
 | `dead_reason` | string \| null | 仅废弃/替代条目有：一句人话（AI 精简、引用用户裁决原话要点）；复活时清空 |
 | `merged_into` | string \| null | 合并目标 id，由 `compass_merge` 写；允许跨需求指向 |
 | `pointers` | array | 追溯链；每项 `{session, at, turn, note}`；只追加；`session`/`at` 必填，`turn` 可选 |
+| `trashedAt` | string \| null | 回收站标记（v1.33）：ISO-8601 时间戳，只在「被用户丢弃的那个节点」上；**与执行态/裁决态完全解耦**，不写追溯链、不要求理由；缺失/null = 未丢弃。祖先被标记时整棵子树按「隐藏」处理（不级联写子节点） |
 | `children` | array | 子节点数组，按创建顺序 |
 
 **不变量**（写入前必须校验，违反即拒绝写入）
@@ -260,6 +289,7 @@ $DSH_HOME/storages/compass/<工作区名>-<hash>/
 6. `merged_into` 非空时，必须指向树中已存在的 id，且不等于自身。
 7. `pointers` 只追加不修改；每项 `note` 非空，`session` 非空，`at` 为 ISO-8601 时间戳（含时区）；`turn` 可选，存在时须为非负整数。
 8. `children` 顺序即建树顺序，不由 UI 或时间排序改写。
+9. `trashedAt` 若存在必须为 ISO-8601 时间戳；项目根不得带该字段；**回收站节点不参与任何可见性、机械计数与需求层聚合**（§3.7）。
 
 **ID 规则**
 
@@ -432,6 +462,8 @@ $DSH_HOME/storages/compass/<工作区名>-<hash>/
 | `E_INVALID_TRANSITION` | 状态转移不在 §6.2 矩阵内 | update |
 | `E_SUBTREE_INCOMPLETE` | 废弃/替代未覆盖整棵子树；`details.missing` 返回缺失 id | update |
 | `E_DEAD_REASON_REQUIRED` | 落 `已废弃`/`已替代` 未给 `dead_reason` | update |
+| `E_TRASH_NOT_FOUND` | 还原/彻底删除的目标不在回收站里（或父节点仍在回收站，`details.trashed_ancestor` 给出祖先）；AI 对回收站节点写入也用它 | 路由 discard/restore/purge、update/plan/move/merge/change |
+| `E_PURGE_FORBIDDEN` | 禁止彻底删除：需求层（基线原话与追溯链是审计资产），或被其它节点 `merged_into` 引用（会断链） | 路由 purge |
 | `E_SELF_MERGE` | `source_id === target_id` | merge |
 | `E_REQUIREMENT_NOT_FOUND` | `requirement_id` 不存在（新建需求请用 `compass_require`） | change |
 | `E_PATH_INVALID` | 非法 task id（路径穿越风险）/非法工作区名 | read(detail)/init |

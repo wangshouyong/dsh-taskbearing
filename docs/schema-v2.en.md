@@ -94,6 +94,34 @@ Rules:
 4. Subagent session: return the parent session's `target_session` and the corresponding parent turn; when the parent log is missing, `turn=null`.
 5. `history-summary` does not depend on the board being initialized; when the host does not expose a session-log root it returns `available=false`, and the client degrades to "history summary unavailable" without blocking the empty state.
 
+### 3.7 Recycle bin (v1.33: panel-side cleanup)
+
+One-off questions also become tasks, so the board needs a way to throw them away and pick them back up. The recycle bin is a **user cleanup action on the panel** and is a different thing from the verdict "已废弃 (abandoned)":
+
+| | Verdict "已废弃" | Recycle-bin marker `trashedAt` |
+|---|---|---|
+| Who writes it | AI tools (`compass_update`) | Panel only (user click) |
+| Reason required | Yes (`dead_reason` + `pointer_note`) | No |
+| Changes state | Changes `verdict_state` | Changes no state at all |
+| Enters trace chain | Yes (pointers) | No |
+| Reversible | Revival must go back to `待裁决` first | One-click restore, original state intact |
+
+**Three write-only routes** (all writes go through `Store.run` with the same lock, version check, and transaction path as AI writes):
+
+| Endpoint | Method | Body | Behaviour |
+|---|---|---|---|
+| `/api/compass/discard` | POST | `{cwd, ids:[...]}` | Marks nodes as discarded. Nodes already in the bin (or under a binned ancestor) go into `skipped`; idempotent. Returns `{discarded, skipped, at, trash_count}` |
+| `/api/compass/restore` | POST | `{cwd, ids:[...]}` | Clears the marker. If an ancestor is still binned ⇒ `E_TRASH_NOT_FOUND` with `details.trashed_ancestor`; restore the ancestor first. Returns `{restored, skipped, trash_count}` |
+| `/api/compass/purge` | POST | `{cwd, id, confirm:"DELETE"}` | **Purge.** Tasks/steps only; requirements ⇒ `E_PURGE_FORBIDDEN`; referenced by another node's `merged_into` ⇒ `E_PURGE_FORBIDDEN`; not binned ⇒ `E_TRASH_NOT_FOUND`; missing `confirm` ⇒ `E_INVALID_ARG`. Writes a full backup to `data/trash/<time>-<id>.json` (kept 30 days) before removing the subtree and its detail/note files; aborts if the backup fails. Returns `{purged, descendants, backup, trash_count}` |
+
+Rules:
+
+1. **The marker only sits on the discarded node itself**; the subtree is derived-hidden from the ancestor — so restore never has to clear children, and a child binned earlier is not un-binned by accident.
+2. Recycled nodes disappear from **every visible surface**: the three views, pinned list, search, mechanical counts, requirement aggregation, and board health checks; `compass_read(tree/tree-lite)` does not return them either (invisible to the AI).
+3. AI writes to a recycled node (`update/plan/move/merge/change`) ⇒ `E_TRASH_NOT_FOUND`, telling the user to restore it in the panel first.
+4. Export/import **preserves `trashedAt`** (moving machines does not lose the bin).
+5. Backup files are outside the schema (`data/trash/`), auto-cleaned after 30 days; once purged, the UI cannot restore it — only the backup file can.
+
 ## 4 Storage design
 
 ### 4.1 Data root and workspace resolution
@@ -249,6 +277,7 @@ The tree has three levels: **project (implicit root) → requirement → task (s
 | `dead_reason` | string \| null | only for abandoned/superseded: one plain sentence (AI-condensed, quoting the user's ruling); cleared on revival |
 | `merged_into` | string \| null | merge target id, written by `compass_merge`; may cross requirements |
 | `pointers` | array | traceability chain; each item `{session, at, turn, note}`; append-only; `session`/`at` required, `turn` optional |
+| `trashedAt` | string \| null | recycle-bin marker (v1.33): ISO-8601 timestamp, only on the node the user actually discarded; **fully decoupled from the exec/verdict state** — no trace entry, no reason required; missing/null = not discarded. When an ancestor is marked, the whole subtree is treated as hidden (children are NOT cascaded) |
 | `children` | array | child nodes, in creation order |
 
 **Invariants** (validated before every write; violation rejects the write)
@@ -261,6 +290,7 @@ The tree has three levels: **project (implicit root) → requirement → task (s
 6. When `merged_into` is non-empty it must point to an id that exists in the tree and is not itself.
 7. `pointers` are append-only; each item has non-empty `note`, non-empty `session`, and an ISO-8601 `at` (with timezone); `turn` is optional and, when present, a non-negative integer.
 8. `children` order is creation order and is never rewritten by the UI or by time-based sorting.
+9. `trashedAt`, when present, must be an ISO-8601 timestamp; the project root must not carry it; **recycled nodes do not participate in visibility, mechanical counts, or requirement aggregation** (§3.7).
 
 **ID rules**
 
@@ -434,6 +464,8 @@ Rules:
 | `E_INVALID_TRANSITION` | status transition not allowed by the §6.2 matrix | update |
 | `E_SUBTREE_INCOMPLETE` | abandon/supersede does not cover the whole subtree; `details.missing` lists ids | update |
 | `E_DEAD_REASON_REQUIRED` | abandoning/superseding without `dead_reason` | update |
+| `E_TRASH_NOT_FOUND` | restore/purge target is not in the recycle bin (or its parent is still binned — `details.trashed_ancestor`); also used when the AI writes to a recycled node | routes discard/restore/purge, update/plan/move/merge/change |
+| `E_PURGE_FORBIDDEN` | purge forbidden: requirements (baseline originals and trace chains are audit assets) or nodes referenced by another node's `merged_into` (would break the chain) | route purge |
 | `E_SELF_MERGE` | `source_id === target_id` | merge |
 | `E_REQUIREMENT_NOT_FOUND` | `requirement_id` does not exist (use `compass_require` to create one) | change |
 | `E_PATH_INVALID` | illegal task id (path traversal risk) / illegal workspace name | read(detail)/init |

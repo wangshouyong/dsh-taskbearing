@@ -13,6 +13,62 @@ export const KIND_REQUIREMENT = "requirement";
 export const KIND_TASK = "task";
 export const NODE_KINDS = [KIND_PROJECT, KIND_REQUIREMENT, KIND_TASK];
 
+/**
+ * 回收站标记（v1.33）：节点上的独立删除标记，与执行态/裁决态完全解耦。
+ * 语义：标记只在「被丢弃的那个节点」上；其整棵子树由祖先标记推导为隐藏，
+ * 因此还原时不需要批量清子节点，也不会误伤此前单独丢弃过的子节点。
+ * @param {any} node
+ * @returns {boolean}
+ */
+export function isTrashed(node) {
+  return typeof node?.trashedAt === "string" && node.trashedAt.length > 0;
+}
+
+/**
+ * 去掉回收站节点（自身或祖先被标记）后的新树（不修改入参）。
+ * 所有「给人/AI 看」的读取路径都先过这一层：视图、计数、搜索、钉顶、聚合、健康自检。
+ * @param {any} tree
+ * @returns {any}
+ */
+export function pruneTrashed(tree) {
+  if (!tree || !tree.root) return tree;
+  /** @param {any} node */
+  const prune = (node) => ({
+    ...node,
+    children: (node.children ?? []).filter((child) => !isTrashed(child)).map(prune)
+  });
+  return { ...tree, root: prune(tree.root) };
+}
+
+/**
+ * 回收站条目（面板抽屉用）：只列「显式被丢弃」且祖先未被丢弃的节点，
+ * 带父链 human_line 与后代数量；按丢弃时间倒序。
+ * @param {any} tree
+ * @returns {Array<{node: any, parent_id: string, path: string[], descendants: number}>}
+ */
+export function collectTrashed(tree) {
+  /** @type {Array<{node: any, parent_id: string, path: string[], descendants: number}>} */
+  const out = [];
+  /** @param {any} node @param {string[]} path */
+  const visit = (node, path) => {
+    for (const child of node.children ?? []) {
+      if (isTrashed(child)) {
+        let descendants = 0;
+        walk(child, (_n, _p, depth) => {
+          if (depth > 0) descendants += 1;
+        });
+        out.push({ node: child, parent_id: node.id, path, descendants });
+        continue; // 子树整体已在回收站，不再重复列出
+      }
+      // project 根没有 human_line，不进父链
+      visit(child, node.id === ROOT_ID ? path : [...path, node.human_line]);
+    }
+  };
+  visit(tree.root, []);
+  out.sort((a, b) => String(b.node.trashedAt ?? "").localeCompare(String(a.node.trashedAt ?? "")));
+  return out;
+}
+
 /** @returns {any} */
 export function emptyTree() {
   return { schema: TREE_SCHEMA, root: { id: ROOT_ID, kind: KIND_PROJECT, children: [] } };
@@ -96,7 +152,7 @@ export function ancestorIds(tree, id) {
  */
 export function flattenLite(tree) {
   const out = [];
-  walk(tree.root, (node) => {
+  walk(pruneTrashed(tree).root, (node) => {
     if (node.kind === KIND_PROJECT) return;
     out.push({
       id: node.id,
@@ -120,6 +176,7 @@ export function countDescendants(node) {
   const byVerdict = { 待裁决: 0, 冲突: 0, 已废弃: 0, 已替代: 0 };
   let total = 0;
   for (const child of node.children ?? []) {
+    if (isTrashed(child)) continue; // 回收站里的子树不计入机械计数（v1.33）
     walk(child, (n) => {
       total += 1;
       if (byExec[n.exec_state] !== undefined) byExec[n.exec_state] += 1;
@@ -161,7 +218,7 @@ export function validateTree(tree) {
   if (!root || typeof root !== "object") corrupt("root 缺失");
   if (root.id !== ROOT_ID || root.kind !== KIND_PROJECT) corrupt(`root 必须是 {id:"${ROOT_ID}", kind:"project"}`);
   if (!Array.isArray(root.children)) corrupt("root.children 必须是数组");
-  for (const key of ["title", "human_line", "exec_state", "verdict_state", "dead_reason", "merged_into", "pointers"]) {
+  for (const key of ["title", "human_line", "exec_state", "verdict_state", "dead_reason", "merged_into", "pointers", "trashedAt"]) {
     if (root[key] !== undefined) corrupt(`project 节点不应包含字段 ${key}`);
   }
 
@@ -205,6 +262,11 @@ export function validateTree(tree) {
       const mergedInto = node.merged_into ?? null;
       if (mergedInto !== null && typeof mergedInto !== "string") corrupt(`${where}.merged_into 非法`);
       if (mergedInto !== null) mergeRefs.push({ id: node.id, merged_into: mergedInto });
+
+      // v1.33 回收站：可选独立删除标记（ISO 时间戳）；老数据没有该字段视为未删除
+      if (node.trashedAt !== undefined && node.trashedAt !== null && !isIsoTimestamp(node.trashedAt)) {
+        corrupt(`${where}.trashedAt 必须是 ISO-8601 时间戳或缺失`);
+      }
 
       if (!Array.isArray(node.pointers)) corrupt(`${where}.pointers 必须是数组`);
       for (const [index, ptr] of node.pointers.entries()) {
@@ -255,6 +317,7 @@ export function aggregateRequirementExecState(requirement) {
   const visit = (node) => {
     for (const child of node.children ?? []) {
       if (child.verdict_state === "已废弃" || child.verdict_state === "已替代") continue;
+      if (isTrashed(child)) continue; // 回收站里的子树不参与聚合（v1.33）
       if (child.kind === "task") states.push(child.exec_state);
       visit(child);
     }

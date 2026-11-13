@@ -7,6 +7,7 @@
 import fsp from "node:fs/promises";
 
 import { boardDuplicateHealth } from "../core/duplicates.js";
+import { pruneTrashed } from "../core/tree.js";
 
 const MISSING_DETAIL_LIMIT = 50;
 const STALE_CHAIN_LIMIT = 20;
@@ -102,7 +103,8 @@ export async function computeBoardStatus(input) {
   let health = null;
   if (mtimeMs > 0) {
     try {
-      const tree = await store.readTree();
+      // v1.33：健康自检只看板上可见节点（回收站里的不报陈旧链/缺详情/重复）
+      const tree = pruneTrashed(await store.readTree());
       health = {
         ...boardDuplicateHealth(tree),
         missing_detail: await missingDetailHealth(store, tree),
