@@ -575,30 +575,47 @@ function TreeView({ rows, expanded, onToggle, onOpenDetail, onDiscard, currentSe
   );
 }
 
-/** 回收站抽屉（v1.33）：列出已丢弃节点；可还原 / 彻底删除（需求层只允许保留，禁物理删除）。 */
+/**
+ * 回收站抽屉（v1.33；抽屉改版 2026-11-13）：
+ * 列出已丢弃节点，可还原 / 彻底删除（需求层只允许保留，禁物理删除）。
+ * 关闭动作只放在底部「关闭」按钮 + Esc + 点击左侧空白：
+ * 右上角留给 DSH 自己的窗口按钮，我们的 X 不再和窗口关闭重叠（原来那个位置极易误触）。
+ */
 function TrashDrawer({ entries, busy, notice, onRestore, onPurge, onClose }) {
   const [confirmId, setConfirmId] = React.useState(null);
   useEffect(() => {
     // 列表变化（还原/删除后）→ 收起未完成的二次确认，避免误删下一行
     setConfirmId(null);
   }, [entries.length]);
+  const total = entries.length;
   return h(
     PortalDialog,
     { variant: "drawer", onClose, label: "回收站", className: "trash-card" },
-    h(DialogHead, {
-      title: "回收站",
-      subtitle: entries.length > 0 ? `${entries.length} 项 · 丢弃不改状态，随时可还原` : "空 · 任务行上的垃圾桶按钮可把一次性任务丢进来",
-      onClose
-    }),
+    h(
+      "div",
+      { className: "trash-head" },
+      h(
+        "div",
+        { className: "trash-head-title" },
+        h(Icon, { name: "trash", size: 15 }),
+        "回收站",
+        total > 0 ? h("span", { className: "trash-chip" }, `${total} 项`) : null
+      ),
+      h(
+        "div",
+        { className: "trash-sub" },
+        total > 0 ? "丢弃不改状态，随时可还原" : "空 · 任务行右侧的垃圾桶按钮可把一次性任务丢进来"
+      )
+    ),
     h(
       "div",
       { className: "modal-body trash-body" },
       notice ? h("div", { className: "trash-notice", role: "status" }, notice) : null,
-      entries.length === 0
+      total === 0
         ? h(
             "div",
             { className: "trash-empty" },
-            h(Icon, { name: "inbox", size: 28 }),
+            h(Icon, { name: "inbox", size: 30 }),
             h("div", { className: "trash-empty-title" }, "回收站是空的"),
             h("div", { className: "hint" }, "任务行右侧的垃圾桶按钮：一次点击丢弃，整棵子树一起收起来，随时还原。")
           )
@@ -608,9 +625,15 @@ function TrashDrawer({ entries, busy, notice, onRestore, onPurge, onClose }) {
             entries.map(({ node, path, descendants }) => {
               const isRequirement = node.kind === "requirement";
               const pending = confirmId === node.id;
+              const kindLabel = isRequirement ? "需求" : node.kind === "task" ? "任务" : "步骤";
+              const kindIcon = isRequirement ? "grid" : node.kind === "task" ? "file" : "check";
               return h(
                 "div",
-                { className: `trash-row${isRequirement ? " kind-requirement" : ""}`, key: node.id },
+                {
+                  className: `trash-row${isRequirement ? " kind-requirement" : ""}${pending ? " confirming" : ""}`,
+                  key: node.id
+                },
+                h("div", { className: "trash-row-icon" }, h(Icon, { name: kindIcon, size: 14 })),
                 h(
                   "div",
                   { className: "trash-row-main" },
@@ -618,70 +641,81 @@ function TrashDrawer({ entries, busy, notice, onRestore, onPurge, onClose }) {
                   h(
                     "div",
                     { className: "trash-row-meta" },
-                    isRequirement ? "需求" : node.kind === "task" ? "任务" : "步骤",
+                    kindLabel,
                     path.length > 0 ? ` · ${path.join(" › ")}` : "",
                     descendants > 0 ? ` · 含 ${descendants} 个后代` : "",
                     ` · 丢弃于 ${formatTrashTime(node.trashedAt)}`
+                  ),
+                  h(
+                    "div",
+                    { className: "trash-row-actions" },
+                    pending
+                      ? [
+                          h(
+                            "button",
+                            {
+                              key: "ok",
+                              type: "button",
+                              className: "btn danger",
+                              disabled: busy,
+                              onClick: () => {
+                                setConfirmId(null);
+                                onPurge(node.id);
+                              }
+                            },
+                            descendants > 0 ? `确认删除（含 ${descendants} 个后代）` : "确认删除"
+                          ),
+                          h(
+                            "button",
+                            { key: "cancel", type: "button", className: "btn", disabled: busy, onClick: () => setConfirmId(null) },
+                            "取消"
+                          )
+                        ]
+                      : [
+                          h(
+                            "button",
+                            {
+                              key: "restore",
+                              type: "button",
+                              className: "btn",
+                              disabled: busy,
+                              onClick: () => onRestore(node.id)
+                            },
+                            "还原"
+                          ),
+                          h(
+                            "button",
+                            {
+                              key: "purge",
+                              type: "button",
+                              className: `btn danger${isRequirement ? " disabled-look" : ""}`,
+                              disabled: busy || isRequirement,
+                              title: isRequirement
+                                ? "需求带着基线原话与追溯链，只能保留在回收站，不能彻底删除"
+                                : "彻底删除（先备份到 data/.trash，保留 30 天）",
+                              onClick: () => {
+                                if (!isRequirement) setConfirmId(node.id);
+                              }
+                            },
+                            isRequirement ? "不可删除" : "彻底删除"
+                          )
+                        ]
                   )
-                ),
-                h(
-                  "div",
-                  { className: "trash-row-actions" },
-                  pending
-                    ? [
-                        h(
-                          "button",
-                          {
-                            key: "ok",
-                            type: "button",
-                            className: "btn danger",
-                            disabled: busy,
-                            onClick: () => {
-                              setConfirmId(null);
-                              onPurge(node.id);
-                            }
-                          },
-                          descendants > 0 ? `确认删除（含 ${descendants} 个后代）` : "确认删除"
-                        ),
-                        h(
-                          "button",
-                          { key: "cancel", type: "button", className: "btn", disabled: busy, onClick: () => setConfirmId(null) },
-                          "取消"
-                        )
-                      ]
-                    : [
-                        h(
-                          "button",
-                          {
-                            key: "restore",
-                            type: "button",
-                            className: "btn",
-                            disabled: busy,
-                            onClick: () => onRestore(node.id)
-                          },
-                          "还原"
-                        ),
-                        h(
-                          "button",
-                          {
-                            key: "purge",
-                            type: "button",
-                            className: `btn danger${isRequirement ? " disabled-look" : ""}`,
-                            disabled: busy || isRequirement,
-                            title: isRequirement
-                              ? "需求带着基线原话与追溯链，只能保留在回收站，不能彻底删除"
-                              : "彻底删除（先备份到 data/.trash，保留 30 天）",
-                            onClick: () => {
-                              if (!isRequirement) setConfirmId(node.id);
-                            }
-                          },
-                          isRequirement ? "不可删除" : "彻底删除"
-                        )
-                      ]
                 )
               );
             })
           )
+    ),
+    h(
+      "div",
+      { className: "trash-foot" },
+      h("span", { className: "trash-foot-hint" }, "Esc 或点击左侧空白也可关闭"),
+      h(
+        "button",
+        { type: "button", className: "btn", onClick: onClose, "data-autofocus": true },
+        h(Icon, { name: "close", size: 13 }),
+        "关闭"
+      )
     )
   );
 }

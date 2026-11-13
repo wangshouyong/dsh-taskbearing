@@ -750,7 +750,7 @@
   .dsh-compass-root .row-dead { display: none; }
 }
 
-/* ---------- 回收站（v1.33） ---------- */
+/* ---------- 回收站（v1.33 / 抽屉改版 2026-11-13） ---------- */
 .dsh-compass-root .trash-entry { position: relative; }
 .dsh-compass-root .trash-entry.has-items { color: var(--compass-warn); }
 .dsh-compass-root .trash-count {
@@ -785,7 +785,56 @@
 .dsh-compass-root .row-discard-btn:focus-visible { opacity: 1; outline: 2px solid var(--compass-accent); outline-offset: 1px; }
 .dsh-compass-root .row-discard-btn:hover { background: var(--compass-active); color: var(--compass-warn); }
 
-.dsh-compass-portal .trash-card .trash-body { display: flex; flex-direction: column; gap: 10px; overflow: auto; min-height: 0; }
+/* 右侧抽屉：整体下移出窗口控制条（右上角最小化/最大化/关闭是 DSH 的，不能和关闭动作混在一起） */
+.dsh-compass-portal .modal-overlay.drawer { padding: 40px 0 0 0; }
+.dsh-compass-portal .modal-card.drawer-card.trash-card {
+  width: min(440px, 100vw);
+  height: 100%;
+  max-height: none;
+  border-radius: var(--compass-radius-lg) 0 0 0;
+  border-right: none;
+  border-bottom: none;
+  animation: compass-slide 200ms ease-out;
+}
+
+.dsh-compass-portal .trash-head {
+  flex: none;
+  padding: 18px 18px 12px;
+  border-bottom: 1px solid var(--compass-border);
+}
+.dsh-compass-portal .trash-head-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--compass-fg);
+}
+.dsh-compass-portal .trash-chip {
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 9px;
+  background: var(--compass-secondary);
+  color: var(--compass-muted);
+  font-weight: 500;
+}
+.dsh-compass-portal .trash-sub {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--compass-muted);
+}
+
+.dsh-compass-portal .trash-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 14px;
+}
 .dsh-compass-portal .trash-notice {
   flex: none;
   font-size: 12px;
@@ -800,39 +849,74 @@
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  padding: 42px 12px;
+  margin: auto;
+  padding: 28px 12px;
   color: var(--compass-muted);
   text-align: center;
 }
 .dsh-compass-portal .trash-empty-title { font-size: 13px; color: var(--compass-fg); }
 .dsh-compass-portal .trash-empty .hint { font-size: 12px; line-height: 1.6; max-width: 280px; }
 .dsh-compass-portal .trash-list { display: flex; flex-direction: column; gap: 8px; }
+
 .dsh-compass-portal .trash-row {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 9px 10px;
+  gap: 10px;
+  padding: 10px 12px;
   border: 1px solid var(--compass-border);
-  border-radius: var(--compass-radius);
+  border-radius: 10px;
   background: var(--compass-card);
+  transition: border-color 120ms ease, background 120ms ease;
 }
 .dsh-compass-portal .trash-row:hover { border-color: var(--compass-border-strong); }
+.dsh-compass-portal .trash-row.confirming {
+  border-color: color-mix(in srgb, var(--compass-warn) 55%, transparent);
+  background: color-mix(in srgb, var(--compass-warn) 6%, var(--compass-card));
+}
+.dsh-compass-portal .trash-row-icon {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  margin-top: 1px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--compass-secondary);
+  color: var(--compass-muted);
+}
+.dsh-compass-portal .trash-row-main { flex: 1; min-width: 0; }
 .dsh-compass-portal .trash-row-title {
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.45;
   color: var(--compass-fg);
   word-break: break-word;
 }
 .dsh-compass-portal .trash-row-meta {
-  margin-top: 2px;
+  margin-top: 3px;
   font-size: 11px;
-  color: var(--compass-muted);
   line-height: 1.5;
+  color: var(--compass-muted);
   word-break: break-word;
 }
-.dsh-compass-portal .trash-row-actions { display: flex; gap: 8px; justify-content: flex-end; }
-.dsh-compass-portal .trash-row-actions .btn { padding: 4px 12px; font-size: 12px; }
-.dsh-compass-portal .trash-row-actions .btn.disabled-look { color: var(--compass-muted); }
+.dsh-compass-portal .trash-row-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+.dsh-compass-portal .trash-row-actions .btn { padding: 3px 10px; font-size: 12px; border-radius: 6px; }
+
+.dsh-compass-portal .trash-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--compass-border);
+}
+.dsh-compass-portal .trash-foot-hint { font-size: 11px; color: var(--compass-muted); }
+.dsh-compass-portal .trash-foot .btn { padding: 5px 16px; }
 
 @container compass (max-width: 340px) {
   .dsh-compass-portal .trash-row-actions { flex-wrap: wrap; justify-content: flex-start; }
