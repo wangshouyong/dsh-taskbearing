@@ -5,7 +5,7 @@
  */
 
 import { appendVersion, addRequirement, findRequirement } from "./baseline.js";
-import { CODES, fail } from "./errors.js";
+import { CODES, CompassError, fail } from "./errors.js";
 import { checkDetailPaths, detailPathErrorMessage } from "./detail-path-guard.js";
 import { findSimilarOpenTasks } from "./duplicates.js";
 import { assertId, nextRequirementId, nextTaskId } from "./ids.js";
@@ -109,8 +109,8 @@ export function createCompass(deps) {
     const isParent = options.role === "parent";
     const node = findNode(tree, id);
     if (!node) {
-      if (isParent) fail(CODES.PARENT_NOT_FOUND, `父节点不存在：${id}`, { parent_id: id, missing: [id] });
-      fail(CODES.TASK_NOT_FOUND, `节点不存在：${id}`, { missing: [id] });
+      if (isParent) fail(CODES.PARENT_NOT_FOUND, `父节点不存在：${id}（先 compass_read(scope=tree) 确认父 id）`, { parent_id: id, missing: [id] });
+      fail(CODES.TASK_NOT_FOUND, `节点不存在：${id}（先 compass_read(scope=tree) 核对真实 id）`, { missing: [id] });
     }
     if (isTrashed(node) || trashedAncestorOf(tree, id)) {
       fail(
@@ -251,7 +251,10 @@ export function createCompass(deps) {
     try {
       matched = await verifyOriginal(args.original_text, { sessionId, now: now() });
     } catch (err) {
-      fail(CODES.ORIGINAL_MISMATCH, `原话校验失败：${err instanceof Error ? err.message : String(err)}`);
+      fail(
+        CODES.ORIGINAL_MISMATCH,
+        `原话校验失败：${err instanceof Error ? err.message : String(err)}（改用 original_refs 让插件逐字取回，或逐字复制当前会话原话）`
+      );
     }
     if (!matched || matched.ok !== true) {
       fail(
@@ -284,7 +287,7 @@ export function createCompass(deps) {
     const siblingId = String(hasAfter ? after : before).trim();
     const index = parent.children.findIndex((child) => child.id === siblingId);
     if (index < 0) {
-      fail(CODES.SIBLING_NOT_FOUND, `兄弟节点不存在或不在同一父节点下：${siblingId}`, {
+      fail(CODES.SIBLING_NOT_FOUND, `兄弟节点不存在或不在同一父节点下：${siblingId}（先 compass_read(scope=tree) 核对；不确定就别传 after/before）`, {
         sibling_id: siblingId,
         parent_id: parent.id
       });
@@ -552,16 +555,13 @@ export function createCompass(deps) {
   }
 
   /**
-   * 正确格式的「标准 + 示例」文本块（可被错误文案直接拼接）。
+   * 正确格式的「标准 + 示例」（压缩版：一行标准 + 三行示例，控制在 ~80 字符内）。
    * @param {"build"|"research"|"summary"} kind
    */
   function sectionFormatBlock(kind) {
     const labels = COMPLETION_SECTIONS[kind];
     const example = labels.map((label) => `${label}：…`).join("\n");
-    return (
-      `正确格式（${SECTION_KIND_TITLE[kind]}）：${labels.join(" / ")} 三段，` +
-      `每段单独占一行、标签在行首、标签后用「：」、段内容不能为空（没有内容写「无」）。例如：\n${example}`
-    );
+    return `正确格式：${labels.join(" / ")} 每段单独占一行、标签在行首、内容非空；例如：\n${example}`;
   }
 
   /**
@@ -678,7 +678,7 @@ export function createCompass(deps) {
         fail(
           CODES.DETAIL_CONTENT_INVALID,
           `任务 ${id} 的完成说明${describeMissingSections(classified)}。\n${sectionFormatBlock(kind)}\n` +
-            `下一步：用 compass_update 重新提交 —— 单节点传 detail:"<上述三段>"，批量传 details:{"${id}":"<上述三段>"}。`,
+            `下一步：compass_update 重提（单节点 detail，批量 details.${id}）。`,
           {
             task_id: id,
             kind,
@@ -701,7 +701,7 @@ export function createCompass(deps) {
           `任务 ${id} 的完成说明既不符合「${SECTION_KIND_TITLE.build}」（${describeMissingSections(buildClassified)}），` +
             `也不符合「${SECTION_KIND_TITLE.research}」（${describeMissingSections(researchClassified)}）。\n` +
             `${sectionFormatBlock("build")}\n或者：\n${sectionFormatBlock("research")}\n` +
-            `下一步：任选一套补齐后用 compass_update 重新提交；也可显式声明类型：details:{"${id}":{kind:"build"|"research", text:"…"}}。`,
+            `下一步：任选一套补齐后用 compass_update 重提；或显式声明 kind:"build"|"research"。`,
           {
             task_id: id,
             build_missing: buildClassified.missing,
@@ -735,7 +735,7 @@ export function createCompass(deps) {
       fail(
         CODES.ANCESTOR_DETAIL_REQUIRED,
         `祖先 ${id} 的汇总详情${describeMissingSections(classified)}。\n${sectionFormatBlock("summary")}\n` +
-          `下一步：在同一次 compass_update 的 details 里写 {"${id}":"验收范围：…\\n完成结论：…\\n遗留风险：…"}（必须与子节点更新同批，不要拆成第二次调用）。`,
+          `下一步：同批 compass_update.details 补 {"${id}":"验收范围：…\\n完成结论：…\\n遗留风险：…"}。`,
         { ancestor_id: id, missing: classified.missing, misplaced: classified.misplaced }
       );
     }
@@ -745,6 +745,211 @@ export function createCompass(deps) {
   /** @param {unknown} value */
   function isPlainObject(value) {
     return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  /**
+   * 聚合预检（v1.36）：一次收集「详情路径 / 完成说明 / 缺失完成说明 / 祖先汇总 / 需求汇总」的问题。
+   * 返回 problems 数组（每项含原始错误与一行摘要），由调用方决定：
+   * - ≥2 项 ⇒ 把全部问题附加到「第一个原始错误」的消息后面一次报全（错误码不变，单问题行为不变）；
+   * - 1 项 ⇒ 不处理，交给下面原有闸门抛原始错误（code/文案与旧版完全一致）。
+   * 依据：顺序闸门会让 AI 逐轮试错；一次报全可把典型 3 轮失败压到 1 轮。
+   * @returns {Promise<Array<{err: CompassError, line: string}>>}
+   */
+  async function collectUpdateProblems(input) {
+    const { tree, ids, args, hasDetail, providedDetails, markingDone, isBatch, doneTargets, ancestorSet } = input;
+    /** @type {Array<{err: CompassError, line: string}>} */
+    const problems = [];
+    const push = (err, line) => problems.push({ err, line });
+
+    /** 已提交过（无论合格与否）的完成说明 / 祖先，用于避免同一问题重复报 */
+    const attemptedCompletion = new Set();
+    const attemptedAncestors = new Set();
+    /** @type {Record<string, boolean>} */
+    const completionOk = {};
+
+    // 1) 单节点 detail：先路径（与原实现同序），再（标记完成时）内容
+    if (hasDetail) {
+      const id = ids[0];
+      const text = String(args.detail);
+      try {
+        assertDetailPaths(text);
+      } catch (err) {
+        if (!(err instanceof CompassError)) throw err;
+        push(err, `${id} 详情路径不存在：${err.details?.missing_paths?.join("、") ?? ""}（换真实路径或写「无」）`);
+      }
+      if (markingDone && doneTargets.length > 0) {
+        attemptedCompletion.add(id);
+        try {
+          validateCompletionDetail(id, text);
+          completionOk[id] = true;
+        } catch (err) {
+          if (!(err instanceof CompassError)) throw err;
+          if (!err.details?.missing_paths) {
+            const labels = err.details?.missing?.length ? err.details.missing : err.details?.misplaced ?? [];
+            push(err, `${id} 完成说明格式问题：${labels.join("、") || "内容不合格"}（各占一行、标签在行首）`);
+          }
+        }
+      }
+    }
+
+    // 2) details 各项：完成说明按两套标准识别、祖先按 summary（与原实现同序：格式先、路径后）
+    for (const [key, entry] of Object.entries(providedDetails)) {
+      if (!ids.includes(key) && !ancestorSet.has(key)) {
+        push(new CompassError(CODES.INVALID_ARG, `details 含未知 id：${key}（只能是本次更新的节点，或其祖先）`, { unknown: [key] }), `details 含未知 id：${key}`);
+        continue;
+      }
+      const isCompletion = markingDone && ids.includes(key);
+      if (isCompletion) {
+        attemptedCompletion.add(key);
+        try {
+          validateCompletionDetail(key, entry);
+          completionOk[key] = true;
+        } catch (err) {
+          if (!(err instanceof CompassError)) throw err;
+          const labels = err.details?.missing?.length ? err.details.missing : err.details?.misplaced ?? [];
+          const where = err.details?.missing_paths ? "详情路径不存在" : "完成说明格式问题";
+          push(err, err.details?.missing_paths
+            ? `${key} ${where}：${err.details.missing_paths.join("、")}（换真实路径或写「无」）`
+            : `${key} ${where}：${labels.join("、") || "内容不合格"}（每段单独占一行、标签在行首）`);
+        }
+      } else if (ancestorSet.has(key)) {
+        attemptedAncestors.add(key);
+        try {
+          validateSummaryDetail(key, entry);
+        } catch (err) {
+          if (!(err instanceof CompassError)) throw err;
+          const labels = err.details?.missing?.length ? err.details.missing : err.details?.misplaced ?? [];
+          push(err, `${key} 祖先汇总格式问题：${labels.join("、") || "内容不合格"}（每段单独占一行、标签在行首）`);
+        }
+      } else {
+        // 与既有闸门同义：既不是本次标记完成的节点，也不是祖先
+        push(
+          new CompassError(CODES.INVALID_ARG, `details 里的 ${key} 既不是本次要标记完成的节点，也不是其祖先`),
+          `details 里的 ${key} 既不是本次要标记完成的节点，也不是其祖先`
+        );
+      }
+    }
+
+    // 3) 缺少完成说明（批量/单节点；本次已提交但格式错的已在上面报过，不重复报）
+    if (markingDone && doneTargets.length > 0) {
+      /** @type {string[]} */
+      const missingCompletion = [];
+      for (const id of doneTargets) {
+        if (completionOk[id] || attemptedCompletion.has(id)) continue;
+        const existing = String(await store.readDetail(id)).trim();
+        if (!existing) {
+          missingCompletion.push(id);
+          continue;
+        }
+        const buildMissing = missingCompletionSections(existing, "build");
+        const researchMissing = missingCompletionSections(existing, "research");
+        if (buildMissing.length > 0 && researchMissing.length > 0) missingCompletion.push(id);
+      }
+      if (missingCompletion.length > 0) {
+        const err = isBatch ? batchDetailError(missingCompletion) : singleDetailError(doneTargets[0]);
+        push(err, isBatch ? `缺少完成说明：${missingCompletion.join("、")}（details 里逐 id 补三段）` : `缺少完成说明：${doneTargets[0]}`);
+      }
+    }
+
+    // 4) 祖先汇总缺失（已提交但格式错的已单列；未提交过的祖先才算缺失）
+    const detailTargets = [];
+    if (hasDetail) detailTargets.push(ids[0]);
+    if (markingDone) {
+      for (const id of Object.keys(providedDetails)) {
+        if (ids.includes(id)) detailTargets.push(id);
+      }
+      for (const id of doneTargets) detailTargets.push(id);
+    }
+    for (const id of [...new Set(detailTargets)]) {
+      const missingAncestors = ancestorIds(tree, id).filter((ancestor) => {
+        const node = findNode(tree, ancestor);
+        return node && node.kind !== KIND_PROJECT && !attemptedAncestors.has(ancestor);
+      });
+      if (missingAncestors.length > 0) {
+        push(ancestorDetailError(id, missingAncestors), `祖先汇总缺失：${id} 的 ${missingAncestors.join("、")}（同批 details 补三段）`);
+      }
+    }
+
+    // 5) 需求汇总：本次会把需求聚合为「已执行」但缺汇总
+    if (markingDone) {
+      const simulated = JSON.parse(JSON.stringify(tree));
+      for (const id of ids) {
+        const node = findNode(simulated, id);
+        if (node && node.kind === KIND_TASK) node.exec_state = "已执行";
+      }
+      const flipped = syncRequirementExecStates(simulated).filter((id) => findNode(simulated, id)?.exec_state === "已执行");
+      for (const id of flipped) {
+        const entry = providedDetails[id];
+        const providedText = typeof entry === "string" ? entry : entry?.text;
+        const text = providedText ?? (await store.readDetail(id));
+        const classified = classifyMissingSections(text, "summary");
+        if (classified.missing.length > 0 || classified.misplaced.length > 0) {
+          const labels = [...classified.missing, ...classified.misplaced];
+          push(requirementSummaryCompError(id, classified), `需求汇总缺失：${id}（${labels.join("、")}；先写三段再标最后一个子任务）`);
+        }
+      }
+    }
+
+    return problems;
+  }
+
+  /** @param {string[]} missingCompletion */
+  function batchDetailError(missingCompletion) {
+    return new CompassError(
+      CODES.BATCH_DETAIL_REQUIRED,
+      `批量标记已执行：以下任务缺少可继承的合格完成说明 —— ${missingCompletion.join("、")}。\n` +
+        `${sectionFormatBlock("build")}\n或者：\n${sectionFormatBlock("research")}\n` +
+        `下一步：compass_update 的 details 里逐 id 补三段，例：{"${missingCompletion[0]}":"核心文件：…\\n契约：…\\n避坑指南：…"}。`,
+      { missing: missingCompletion, expected_sections: { build: COMPLETION_SECTIONS.build, research: COMPLETION_SECTIONS.research } }
+    );
+  }
+
+  /** @param {string} id */
+  function singleDetailError(id) {
+    return new CompassError(
+      CODES.DETAIL_REQUIRED,
+      `标记已执行必须带完成说明：${id} 既没有本次 detail，也没有可继承的合格旧详情。\n` +
+        `${sectionFormatBlock("build")}\n或者：\n${sectionFormatBlock("research")}\n` +
+        `下一步：本次 compass_update 传 detail:"核心文件：…\\n契约：…\\n避坑指南：…"（查询型换三段）。`,
+      { task_id: id, expected_sections: { build: COMPLETION_SECTIONS.build, research: COMPLETION_SECTIONS.research } }
+    );
+  }
+
+  /** @param {string} id @param {string[]} missingAncestors */
+  function ancestorDetailError(id, missingAncestors) {
+    return new CompassError(
+      CODES.ANCESTOR_DETAIL_REQUIRED,
+      `更新 ${id} 的详情时，必须同步更新其祖先链的汇总（父任务、父级的父级、需求整条链路，父链不能停在旧内容）。` +
+        `缺少：${missingAncestors.join("、")}。\n${sectionFormatBlock("summary")}\n` +
+        `下一步：同一次 compass_update 的 details 补 ${missingAncestors
+          .map((ancestor) => `{"${ancestor}":"验收范围：…\\n完成结论：…\\n遗留风险：…"}`)
+          .join("、")}（必须同批）。`,
+      { node: id, missing_ancestors: missingAncestors }
+    );
+  }
+
+  /** @param {string} id @param {{missing: string[], misplaced: string[]}} classified */
+  function requirementSummaryCompError(id, classified) {
+    return new CompassError(CODES.REQUIREMENT_DETAIL_REQUIRED, requirementSummaryError(id, classified), {
+      requirement_ids: [id],
+      missing: classified.missing,
+      misplaced: classified.misplaced
+    });
+  }
+
+  /**
+   * 多项问题时，把其余问题附加到第一个原始错误的消息后（一次报全；错误码仍是第一个问题的码）。
+   * @param {Array<{err: CompassError, line: string}>} problems
+   * @returns {CompassError}
+   */
+  function aggregateProblemsError(problems) {
+    const [primary, ...rest] = problems;
+    const lines = rest.map((problem, index) => `${index + 2}. ${problem.line}`).join("\n");
+    return new CompassError(
+      primary.err.code,
+      `${primary.err.message}\n另有 ${rest.length} 项问题（建议一次改完，避免逐轮报错）：\n${lines}\n下一步：改完后重新调用 compass_update；本次未写入任何数据，可直接重试。`,
+      { ...(primary.err.details ?? {}), violations: problems.map((problem) => ({ code: problem.err.code, message: problem.line })) }
+    );
   }
 
   /**
@@ -774,7 +979,7 @@ export function createCompass(deps) {
       fail(CODES.INVALID_ARG, "至少要提供一个可写字段（exec_state / verdict_state / dead_reason / detail / details）");
     }
     if (hasDetail && ids.length !== 1) fail(CODES.INVALID_ARG, "detail 只作用于单个节点（批量请用 details）");
-    if (hasDetail) assertDetailPaths(String(args.detail));
+    // 路径校验移到聚合预检之后（v1.36）：多项问题时一次报全，单项时仍由原闸门抛原错误
     if (hasExec) assertExecState(args.exec_state);
     if (hasVerdict) assertVerdictInput(args.verdict_state);
     const note = optionalNote(args.pointer_note, "pointer_note");
@@ -805,7 +1010,6 @@ export function createCompass(deps) {
     // 先读树并确认节点存在，再判断哪些节点真的会「变成已执行」（幂等重标不强制重复写说明）
     const tree = await store.readTree();
     for (const id of ids) {
-      if (!findNode(tree, id)) fail(CODES.TASK_NOT_FOUND, `节点不存在：${id}`, { missing: [id] });
       assertWritable(tree, id);
     }
     // v1.28 / B-59：需求层执行状态由插件按子任务机械聚合，AI 不可手写
@@ -834,6 +1038,21 @@ export function createCompass(deps) {
         if (node && node.kind !== KIND_PROJECT) ancestorSet.add(ancestor);
       }
     }
+
+    // v1.36：多项问题时把其余问题附加到第一个错误后一次报全（错误码与单问题文案不变）
+    const updateProblems = await collectUpdateProblems({
+      tree,
+      ids,
+      args,
+      hasDetail,
+      providedDetails,
+      markingDone,
+      isBatch,
+      doneTargets,
+      ancestorSet
+    });
+    if (updateProblems.length >= 2) throw aggregateProblemsError(updateProblems);
+    if (hasDetail) assertDetailPaths(String(args.detail));
 
     /** 完成说明（本次标记完成的节点）：id → {kind, text} */
     const completionById = {};
@@ -865,18 +1084,7 @@ export function createCompass(deps) {
           if (buildMissing.length > 0 && researchMissing.length > 0) missingCompletion.push(id);
         }
         if (missingCompletion.length > 0) {
-          fail(
-            CODES.BATCH_DETAIL_REQUIRED,
-            `批量标记已执行：以下任务缺少可继承的合格完成说明 —— ${missingCompletion.join("、")}。\n` +
-              `${sectionFormatBlock("build")}\n或者：\n${sectionFormatBlock("research")}\n` +
-              `下一步：在同一次 compass_update 的 details 里逐任务提供，例如 details:{${missingCompletion
-                .map((id) => `"${id}":"核心文件：…\\n契约：…\\n避坑指南：…"`)
-                .join(",")}}；查询/调研型任务改成「查询结论/数据来源/后续建议」三段。`,
-            {
-              missing: missingCompletion,
-              expected_sections: { build: COMPLETION_SECTIONS.build, research: COMPLETION_SECTIONS.research }
-            }
-          );
+          throw batchDetailError(missingCompletion);
         }
       } else {
         const id = doneTargets[0];
@@ -886,13 +1094,7 @@ export function createCompass(deps) {
           const researchMissing = existing ? missingCompletionSections(existing, "research") : ["core"];
           const inheritOk = Boolean(existing) && (buildMissing.length === 0 || researchMissing.length === 0);
           if (!inheritOk) {
-            fail(
-              CODES.DETAIL_REQUIRED,
-              `标记已执行必须带完成说明：${id} 既没有本次 detail，也没有可继承的合格旧详情。\n` +
-                `${sectionFormatBlock("build")}\n或者：\n${sectionFormatBlock("research")}\n` +
-                `下一步：在同一次 compass_update 里传 detail:"核心文件：…\\n契约：…\\n避坑指南：…"（查询/调研型改成「查询结论/数据来源/后续建议」）。`,
-              { task_id: id, expected_sections: { build: COMPLETION_SECTIONS.build, research: COMPLETION_SECTIONS.research } }
-            );
+            throw singleDetailError(id);
           }
         } else {
           validateCompletionDetail(id, String(args.detail));
@@ -922,15 +1124,7 @@ export function createCompass(deps) {
         missingAncestors.push(ancestor);
       }
       if (missingAncestors.length > 0) {
-        fail(
-          CODES.ANCESTOR_DETAIL_REQUIRED,
-          `更新 ${id} 的详情时，必须同步更新其祖先链的汇总（父任务、父级的父级、需求整条链路，父链不能停在旧内容）。` +
-            `缺少：${missingAncestors.join("、")}。\n${sectionFormatBlock("summary")}\n` +
-            `下一步：在同一次 compass_update 的 details 里为每个缺失祖先各写一段，例如 details: {${missingAncestors
-              .map((ancestor) => `"${ancestor}":"验收范围：…\\n完成结论：…\\n遗留风险：…"`)
-              .join(",")}}（必须同批，不要拆成第二次调用）。`,
-          { node: id, missing_ancestors: missingAncestors }
-        );
+        throw ancestorDetailError(id, missingAncestors);
       }
     }
 

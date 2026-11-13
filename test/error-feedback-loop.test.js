@@ -151,7 +151,7 @@ test("闭环④：只写子节点详情、不更新祖先链 ⇒ 报错给缺失
     );
     assertActionable(err, {
       missing: [new RegExp(`缺少：${requirementId}`)],
-      extra: [/同一次 compass_update/, new RegExp(`details:\\s*\\{"${requirementId}"`)],
+      extra: [/同一次 compass_update/, new RegExp(`details\\s*补\\s*\\{"${requirementId}"`), /必须同批/],
       // 必须强调「同批」，否则 AI 会拆成第二次调用
       needsFormat: true
     });
@@ -368,6 +368,122 @@ test("闭环⑩：详情里写了不存在的文件路径 ⇒ 报错点名路径
       detail: "核心文件：无（该文件不存在，已核实）\n契约：无\n避坑指南：无",
       details: { [requirementId]: SUMMARY }
     });
+    assert.ok(fixed.updated.includes(taskId));
+  } finally {
+    await env.cleanup();
+  }
+});
+
+test("闭环⑪：一次调用同时有 3 项问题 ⇒ 一条报错列全，改完一次通过（不再逐轮试错）", async () => {
+  const env = await makeEnv();
+  try {
+    const { requirementId, taskId } = await seedOneTask(env);
+    // 第 1 次：路径不存在 + 格式挤一行 + 缺祖先汇总（旧版会分 3 轮报）
+    const err = await rejectsWith(
+      env.compass.update({
+        task_ids: [taskId],
+        exec_state: "已执行",
+        pointer_note: "完成",
+        detail: "核心文件：src/nope-xyz.js 契约：无 避坑指南：无"
+      }),
+      "E_DETAIL_PATH_NOT_FOUND"
+    );
+    assert.match(err.message, /另有 \d+ 项问题/, "多问题时必须一次列全");
+    assert.match(err.message, /完成说明格式问题/, "应列出格式问题");
+    assert.match(err.message, new RegExp(`祖先汇总缺失：${taskId} 的 ${requirementId}`), "应列出祖先缺失");
+    assert.match(err.message, /需求汇总缺失/, "应列出需求汇总缺失");
+    assert.match(err.message, /下一步：/, "聚合报错也要给下一步");
+    assert.ok(Array.isArray(err.details?.violations) && err.details.violations.length >= 3, "details.violations 要带全部问题");
+
+    // 第 2 次：把 3 项一次改完（路径写「无」、三段分行、补祖先/需求汇总）⇒ 直接成功
+    const fixed = await env.compass.update({
+      task_ids: [taskId],
+      exec_state: "已执行",
+      pointer_note: "完成",
+      detail: "核心文件：无\n契约：无\n避坑指南：无",
+      details: { [requirementId]: SUMMARY }
+    });
+    assert.ok(fixed.updated.includes(taskId));
+  } finally {
+    await env.cleanup();
+  }
+});
+
+test("闭环⑫：id 写错 ⇒ 提示先 compass_read 核对，改成真实 id 后通过", async () => {
+  const env = await makeEnv();
+  try {
+    const { taskId } = await seedOneTask(env);
+    const err = await rejectsWith(
+      env.compass.update({ task_ids: ["R-001-T-9"], exec_state: "进行中", pointer_note: "推进" }),
+      "E_TASK_NOT_FOUND"
+    );
+    assert.match(err.message, /节点不存在：R-001-T-9/);
+    assert.match(err.message, /compass_read/, "必须告诉下一步怎么核对 id");
+    const fixed = await env.compass.update({ task_ids: [taskId], exec_state: "进行中", pointer_note: "推进" });
+    assert.ok(fixed.updated.includes(taskId));
+  } finally {
+    await env.cleanup();
+  }
+});
+
+test("闭环⑬：after 兄弟不存在 ⇒ 提示核对或别传，改成不传 after 后通过", async () => {
+  const env = await makeEnv();
+  try {
+    const { requirementId } = await seedOneTask(env);
+    const err = await rejectsWith(
+      env.compass.plan({ parent_id: requirementId, after: "R-001-T-9", title: "任务2", human_line: "任务二" }),
+      "E_SIBLING_NOT_FOUND"
+    );
+    assert.match(err.message, /兄弟节点不存在或不在同一父节点下：R-001-T-9/);
+    assert.match(err.message, /compass_read|别传 after\/before/, "必须给下一步");
+    const fixed = await env.compass.plan({ parent_id: requirementId, title: "任务2", human_line: "任务二" });
+    assert.ok(fixed.task_id);
+  } finally {
+    await env.cleanup();
+  }
+});
+
+test("闭环⑭：原话不匹配 ⇒ 提示 original_refs/逐字复制，改对后通过", async () => {
+  const env = await makeEnv({
+    verify: async (text) => {
+      if (text !== "正确的原话") throw new Error("与当前会话用户消息不逐字一致");
+      return { ok: true, text };
+    }
+  });
+  try {
+    await env.compass.init();
+    const err = await rejectsWith(
+      env.compass.require({ title: "需求B", human_line: "b", surface: "b", original_text: "我编的原话" }),
+      "E_ORIGINAL_MISMATCH"
+    );
+    assert.match(err.message, /原话校验失败/);
+    assert.match(err.message, /original_refs|逐字复制/, "必须告诉下一步怎么改");
+    const fixed = await env.compass.require({ title: "需求B", human_line: "b", surface: "b", original_text: "正确的原话" });
+    assert.ok(fixed.requirement_id);
+  } finally {
+    await env.cleanup();
+  }
+});
+
+test("闭环⑮：非法裁决转移 ⇒ 列出当前状态允许的目标，按允许目标改后通过", async () => {
+  const env = await makeEnv();
+  try {
+    const { taskId } = await seedOneTask(env);
+    await env.compass.update({ task_ids: [taskId], verdict_state: "待裁决", pointer_note: "裁决中" });
+    await env.compass.update({
+      task_ids: [taskId],
+      verdict_state: "已废弃",
+      dead_reason: "不做了",
+      pointer_note: "废弃"
+    });
+    const err = await rejectsWith(
+      env.compass.update({ task_ids: [taskId], verdict_state: "冲突", pointer_note: "想改成冲突" }),
+      "E_INVALID_TRANSITION"
+    );
+    assert.match(err.message, /不允许的裁决转移：已废弃 → 冲突/);
+    assert.match(err.message, /当前状态允许：/, "必须列出合法目标");
+    // 按报错里列出的合法目标走（已废弃 → 待裁决）
+    const fixed = await env.compass.update({ task_ids: [taskId], verdict_state: "待裁决", pointer_note: "先复活再谈冲突" });
     assert.ok(fixed.updated.includes(taskId));
   } finally {
     await env.cleanup();

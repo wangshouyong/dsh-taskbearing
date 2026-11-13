@@ -83,6 +83,22 @@ export function checkVerdictTransition(from, to) {
 }
 
 /**
+ * 当前状态下合法可达的裁决目标（用于非法转移报错给出「下一步」）。
+ * @param {string|null} from
+ * @returns {string[]}
+ */
+export function allowedVerdictTargets(from) {
+  const prefix = `${from ?? "null"}>`;
+  const targets = [];
+  for (const key of ALLOWED_VERDICT_TRANSITIONS) {
+    if (!key.startsWith(prefix)) continue;
+    const target = key.slice(prefix.length);
+    if (target !== INSTANT_VERDICT && !targets.includes(target)) targets.push(target);
+  }
+  return targets.map((target) => (target === "null" ? "null（清空）" : target));
+}
+
+/**
  * @param {string|null} from
  * @param {string|null} to
  * @returns {string}
@@ -97,7 +113,8 @@ export function describeIllegal(from, to) {
   if (f === INSTANT_VERDICT) return "「已确认继续」不落板，不能作为起点";
   if ((f === "已废弃" || f === "已替代") && t === "null") return "复活必须先到「待裁决」，不能直接回 null";
   if ((f === "已废弃" || f === "已替代") && t === INSTANT_VERDICT) return "复活必须先到「待裁决」，再确认继续";
-  return `不允许的裁决转移：${f} → ${t}`;
+  const targets = allowedVerdictTargets(from);
+  return `不允许的裁决转移：${f} → ${t}。当前状态允许：${targets.length > 0 ? targets.join(" / ") : "（无合法目标）"}`;
 }
 
 /**

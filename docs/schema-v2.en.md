@@ -491,7 +491,13 @@ The rules block cannot carry every formatting detail, so **any error that reject
 
 Also distinguish two failure modes: **"not written at all"** vs **"written but mis-formatted"**. Reporting only "missing" for the latter makes the AI keep appending content and never pass; the error must say "the label is not at the start of its own line".
 
-Whether this fallback actually works is guaranteed by a closed-loop test: `test/error-feedback-loop.test.js` simulates "AI writes wrong → reads the error only → fixes once → succeeds" across 10 scenarios (completion-note format/missing sections/two standards, ancestor chain, requirement summary via import, batch completion notes, pointer_note, dead_reason, subtree coverage, non-existent path); changing any message must keep that test green.
+Whether this fallback actually works is guaranteed by a closed-loop test: `test/error-feedback-loop.test.js` simulates "AI writes wrong → reads the error only → fixes once → succeeds" across 15 scenarios (completion-note format/missing sections/two standards, ancestor chain, requirement summary via import, batch completion notes, pointer_note, dead_reason, subtree coverage, non-existent path, id typo, bad sibling, original mismatch, illegal transition, and multi-problem aggregation); changing any message must keep that test green.
+
+**Concise and report-all-at-once (v1.36)**
+
+- **Concise**: one line for the format standard (`Correct format: A / B / C, one section per line, label at line start, non-empty content; e.g. …`) and one line for the next step naming the tool and arguments; no long re-explanations.
+- **Report all at once**: when one `compass_update` has several problems (path / completion-note format / missing completion note / ancestor summaries / requirement summary), throw **one** error — using the first problem's code, appending "plus N more problems" with each listed, and exposing every item in `details.violations`. The AI can then fix everything in one round instead of failing 3 rounds; when there is only a single problem, the code and message are exactly as before.
+- Other "statement-only" errors must also carry a next step: `E_TASK_NOT_FOUND` / `E_PARENT_NOT_FOUND` / `E_SIBLING_NOT_FOUND` point to `compass_read(scope=tree)`; `E_ORIGINAL_MISMATCH` points to `original_refs` or verbatim copying; `E_INVALID_TRANSITION` lists the targets allowed from the current state.
 
 **Context (session / at / turn / workspace root)**
 
