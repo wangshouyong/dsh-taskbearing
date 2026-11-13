@@ -95,32 +95,66 @@ test("buildRuleBlock / locateRuleBlock：边界稳定", () => {
   assert.equal(text.slice(located.begin, located.end + RULE_END.length), block);
 });
 
-test("规则 v2：详情三段锚点 + 阻塞写法（B-49）", async () => {
+test("规则 v1.35：瘦身后保留全部「发起时机/判断」规则，格式细则下沉到报错", async () => {
   const { RULE_BODY } = await import("../src/host/rules.js");
+
+  // 保留项（报错兜不住的发起时机/判断类）：逐条断言关键指令仍在
+  assert.match(RULE_BODY, /compass_status/);
+  assert.match(RULE_BODY, /开工先规划/);
+  assert.match(RULE_BODY, /完整任务树/);
+  assert.match(RULE_BODY, /层级按从属组织/);
+  assert.match(RULE_BODY, /after\/before/);
+  assert.match(RULE_BODY, /compass_move/);
+  assert.match(RULE_BODY, /pointer_note/);
+  assert.match(RULE_BODY, /卡住时把执行态标为「已阻塞」/);
+  assert.match(RULE_BODY, /阻塞：等什么 \/ 谁能解 \/ 下一步/);
+  assert.match(RULE_BODY, /需求层 exec_state 由插件按子任务机械聚合/);
   assert.match(RULE_BODY, /交接文档/);
   assert.match(RULE_BODY, /核心文件/);
   assert.match(RULE_BODY, /契约\/文档/);
   assert.match(RULE_BODY, /避坑指南/);
-  assert.match(RULE_BODY, /13\. 卡住时把执行态标为「已阻塞」/);
-  assert.match(RULE_BODY, /阻塞：等什么 \/ 谁能解 \/ 下一步/);
-  assert.match(RULE_BODY, /compass_migrate/);
-  // v1.24 规则 14：history 工具使用边界 + 当前会话原话写入方式
-  assert.match(RULE_BODY, /14\. history 边界/);
-  assert.match(RULE_BODY, /original_text/);
-  assert.match(RULE_BODY, /当前上下文已有的诉求\/原话不得再用 history 重拉/);
-  // v1.27 规则 15：标记已执行必须写完成说明（两套内容标准）；v1.31 / B-62 结构化 + 祖先链
-  assert.match(RULE_BODY, /15\. 标记已执行必须写完成说明/);
-  assert.match(RULE_BODY, /details（逐任务）/);
   assert.match(RULE_BODY, /查询结论 \/ 数据来源 \/ 后续建议/);
-  assert.match(RULE_BODY, /三段必须各起一行、标签在行首/);
-  // v1.31 规则 17：需求完成汇总硬校验
-  assert.match(RULE_BODY, /17\. 需求行由子任务机械聚合/);
-  assert.match(RULE_BODY, /E_REQUIREMENT_DETAIL_REQUIRED/);
   assert.match(RULE_BODY, /验收范围 \/ 完成结论 \/ 遗留风险/);
-  // v1.31 规则 18：整条祖先链一起更新（B-62）
-  assert.match(RULE_BODY, /18\. 整条祖先链一起更新/);
-  assert.match(RULE_BODY, /E_ANCESTOR_DETAIL_REQUIRED/);
-  // 规则条数：18 条编号规则
+  assert.match(RULE_BODY, /整条祖先链/);
+  assert.match(RULE_BODY, /漏记先补录/);
+  assert.match(RULE_BODY, /history 边界/);
+  assert.match(RULE_BODY, /original_text/);
+  assert.match(RULE_BODY, /不重拉历史/);
+  assert.match(RULE_BODY, /防重复/);
+  assert.match(RULE_BODY, /已替代/);
+  assert.match(RULE_BODY, /整棵子树/);
+  assert.match(RULE_BODY, /推翻上次废弃结论/);
+  assert.match(RULE_BODY, /compass_migrate/);
+
+  // 下沉项（写入格式细则不再写进规则区块，改由插件报错四要素兜底）
+  assert.doesNotMatch(RULE_BODY, /三段必须各起一行、标签在行首/);
+  assert.doesNotMatch(RULE_BODY, /E_REQUIREMENT_DETAIL_REQUIRED/);
+  assert.doesNotMatch(RULE_BODY, /E_ANCESTOR_DETAIL_REQUIRED/);
+  assert.doesNotMatch(RULE_BODY, /details（逐任务）/);
+  // 但必须留一句明确指路：格式错了按报错改
+  assert.match(RULE_BODY, /由插件写前校验/);
+  assert.match(RULE_BODY, /按报错一次改对/);
+
+  // 规则条数：9 条，编号连续
   const numbers = [...RULE_BODY.matchAll(/^(\d+)\. /gm)].map((match) => Number(match[1]));
-  assert.deepEqual(numbers, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]);
+  assert.deepEqual(numbers, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  // 体积预算：必须明显小于瘦身前（18 条 / 2079 字符）
+  assert.ok(RULE_BODY.length <= 1600, `规则正文仍偏长：${RULE_BODY.length} 字符`);
+});
+
+test("规则升级：旧 18 条区块安装在先 → 升级为瘦身版，整块替换不堆叠、用户内容零改动", async (t) => {
+  const { installRuleBlock, RULE_BEGIN, buildRuleBlock } = await import("../src/host/rules.js");
+  const oldBlock = await fs.readFile(new URL("./fixtures/rule-block-v1.33-18rules.txt", import.meta.url), "utf8");
+  const file = await tempRules(t);
+  await fs.writeFile(file, `# 我的规则\n\n${oldBlock.trim()}\n\n尾巴内容\n`, "utf8");
+
+  const result = await installRuleBlock(file);
+  assert.equal(result.status, "updated");
+  const text = await fs.readFile(file, "utf8");
+  assert.equal((text.match(new RegExp(RULE_BEGIN, "g")) ?? []).length, 1);
+  assert.ok(text.trimEnd().endsWith("尾巴内容"));
+  assert.ok(text.includes("# 我的规则"));
+  assert.equal(text.includes(oldBlock.trim()), false, "旧区块必须被整块替换");
+  assert.equal(text.includes(buildRuleBlock()), true);
+  assert.ok(buildRuleBlock().length < oldBlock.trim().length, "升级后体积必须变小");
 });
