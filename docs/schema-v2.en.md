@@ -480,6 +480,19 @@ Rules:
 | `E_MIGRATE_ITEM_INVALID` | migration `items` field invalid (type/parent/terminal constraints) | migrate |
 | `E_MIGRATE_ARCHIVE` | archiving/renaming the source failed after a successful import (data already imported) | migrate |
 
+**Error-message standard (v0.1.5, hard requirement: the error IS the next step)**
+
+The rules block cannot carry every formatting detail, so **any error that rejects a write must let the AI fix it by reading the error alone**. Each such error must provide four elements:
+
+1. **What is missing**: which section / which ancestor id / which path does not exist / which child node is not covered.
+2. **The correct format**, e.g. "one section per line, label at line start, label followed by ':'", non-empty content.
+3. **A copyable example** with real ids (not just "…" placeholders).
+4. **The next step**: name the tool and parameter (e.g. add `{"R-001":"…"}` to `details` in the *same* `compass_update` call) and say whether it must be in the same batch.
+
+Also distinguish two failure modes: **"not written at all"** vs **"written but mis-formatted"**. Reporting only "missing" for the latter makes the AI keep appending content and never pass; the error must say "the label is not at the start of its own line".
+
+Whether this fallback actually works is guaranteed by a closed-loop test: `test/error-feedback-loop.test.js` simulates "AI writes wrong → reads the error only → fixes once → succeeds" across 10 scenarios (completion-note format/missing sections/two standards, ancestor chain, requirement summary via import, batch completion notes, pointer_note, dead_reason, subtree coverage, non-existent path); changing any message must keep that test green.
+
 **Context (session / at / turn / workspace root)**
 
 - Tools must be able to locate the "current workspace root", otherwise `compass_init`/`compass_read` cannot work.

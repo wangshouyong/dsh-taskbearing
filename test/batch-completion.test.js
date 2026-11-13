@@ -55,7 +55,9 @@ test("批量已执行：无 details 且无合格旧详情 ⇒ E_BATCH_DETAIL_REQ
       env.compass.update({ task_ids: ["R-001-T-1", "R-001-T-2"], exec_state: "已执行", pointer_note: "批量完成" }),
       "E_BATCH_DETAIL_REQUIRED"
     );
-    assert.match(err.message, /批量标记已执行时，必须为每个任务提供简要的完成说明，或者至少继承原有的 detail 并要求补充。/);
+    assert.match(err.message, /缺少可继承的合格完成说明/);
+    assert.match(err.message, /每段单独占一行、标签在行首/, "报错要说清格式要求");
+    assert.match(err.message, /下一步：/, "报错要给下一步动作");
     assert.deepEqual(new Set(err.details.missing), new Set(["R-001-T-1", "R-001-T-2"]));
     const tree = await env.store.readTree();
     assert.equal(tree.root.children[0].children[0].exec_state, "进行中", "状态未变");
