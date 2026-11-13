@@ -20,6 +20,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { RULE_BEGIN, RULE_BODY, RULE_END, buildRuleBlock, installRuleBlock } from "../src/host/rules.js";
+import { pinnedNodes } from "../src/client/board-view.js";
 import { makeEnv, rejectsWith } from "./helpers.js";
 
 const SUMMARY = "验收范围：该节点下全部任务\n完成结论：已完成并留证据\n遗留风险：无";
@@ -30,7 +31,7 @@ const SUMMARY = "验收范围：该节点下全部任务\n完成结论：已完�
  */
 const TIMING_SCENARIOS = [
   { id: "每轮自查", rule: 0, keywords: ["compass_status", "落板"] },
-  { id: "确认即落板（含排期靠后）", rule: 1, keywords: ["确认即落板", "不以「是否开工」为前提", "排期", "待裁决", "after/before", "完整任务树"] },
+  { id: "确认即落板（含排期靠后）", rule: 1, keywords: ["确认即落板", "不以「是否开工」为前提", "排期排在当前主线之后", "落执行线「未开始」", "after/before", "完整任务树"] },
   { id: "新需求先落需求", rule: 1, keywords: ["compass_require"] },
   { id: "层级从属", rule: 2, keywords: ["层级按从属组织", "compass_move"] },
   { id: "中间插入", rule: 2, keywords: ["after/before", "废弃重建"] },
@@ -162,4 +163,67 @@ test("D2. 回滚路径：装回旧 18 条区块 → 再升级回瘦身版，两�
   assert.ok(text.includes(buildRuleBlock()), "必须回到瘦身版");
   assert.ok(text.includes("# 我的规则"), "用户内容必须保留");
   assert.equal((text.match(new RegExp(RULE_BEGIN, "g")) ?? []).length, 1);
+});
+
+test("E. 规则 1 场景可执行性：排期靠后的计划真能落成「未开始+待裁决+after 定位」，且在钉顶可见、排到时能推进", async () => {
+  const env = await makeEnv();
+  try {
+    await env.compass.init();
+    const requirement = await env.compass.require({ title: "回收站", human_line: "把回收站做完", surface: "回收站" });
+    // 当前主线：回收站（进行中）
+    const mainline = await env.compass.plan({ parent_id: requirement.requirement_id, title: "回收站", human_line: "把回收站做完" });
+    await env.compass.update({ task_ids: [mainline.task_id], exec_state: "进行中", pointer_note: "开工" });
+    // 用户插话：前端白色后面再说 → 按规则 1 落板：未开始 + 待裁决 + after 当前主线
+    const later = await env.compass.plan({
+      parent_id: requirement.requirement_id,
+      after: mainline.task_id,
+      title: "前端调白",
+      human_line: "前端白色也要调一下（排期靠后）"
+    });
+    await env.compass.update({
+      task_ids: [later.task_id],
+      verdict_state: "待裁决",
+      pointer_note: "已确认要做，排期排在回收站之后"
+    });
+
+    const tree = await env.store.readTree();
+    const reqNode = tree.root.children[0];
+    const order = reqNode.children.map((child) => child.id);
+    assert.deepEqual(order, [mainline.task_id, later.task_id], "after 必须把它排在当前主线之后");
+    const laterNode = reqNode.children.find((child) => child.id === later.task_id);
+    assert.equal(laterNode.exec_state, "未开始", "执行线落未开始");
+    assert.equal(laterNode.verdict_state, "待裁决", "裁决线落待裁决");
+
+    // 钉顶区可见（用户目标：不会被忘掉）
+    const pinned = pinnedNodes(tree);
+    assert.equal(pinned.some((item) => item.node.id === later.task_id), true, "排期靠后的计划必须出现在钉顶区");
+
+    // 排到该做的时候：verdict 置回 null + exec 推进（一步完成）
+    const promoted = await env.compass.update({
+      task_ids: [later.task_id],
+      verdict_state: null,
+      exec_state: "进行中",
+      pointer_note: "回收站收尾，开始前端调白"
+    });
+    assert.ok(promoted.updated.includes(later.task_id));
+    const after = await env.store.readTree();
+    const promotedNode = after.root.children[0].children.find((child) => child.id === later.task_id);
+    assert.equal(promotedNode.exec_state, "进行中");
+    assert.equal(promotedNode.verdict_state, null, "开始后回到普通任务");
+    assert.equal(pinnedNodes(after).some((item) => item.node.id === later.task_id), false, "开始后退出钉顶");
+  } finally {
+    await env.cleanup();
+  }
+});
+
+test("F. 变异检查：把规则 1 换回旧版（『开工才 plan』），覆盖矩阵必须报红 —— 证明测试不是摆设", () => {
+  const OLD_RULE_1 =
+    "1. 开工先规划：用户已确认开工才 compass_plan，商量阶段不写板；新需求先 compass_require 落需求与原话再拆任务；开工前先建完整任务树（含未开始），执行中逐步推进，不等到做完才补记。";
+  const mutated = RULE_BODY.replace(/^1\. .*$/m, OLD_RULE_1);
+  const gaps = TIMING_SCENARIOS.flatMap((scenario) =>
+    scenario.keywords.filter((keyword) => !mutated.includes(keyword)).map((keyword) => `${scenario.id}→${keyword}`)
+  );
+  assert.ok(gaps.length > 0, "规则被改回旧版时，覆盖矩阵必须能发现（否则是无效测试）");
+  assert.ok(gaps.some((gap) => gap.includes("确认即落板")), "必须发现『确认即落板』缺失");
+  assert.ok(gaps.some((gap) => gap.includes("排期排在当前主线之后")), "必须发现『排期约定』缺失");
 });
