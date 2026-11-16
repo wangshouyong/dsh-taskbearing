@@ -2,6 +2,11 @@
 
 本项目遵循语义化版本（SemVer）。
 
+## 未发布（0.1.9 计划）
+
+- **npm 渠道恢复**：`dsh-taskbearing@0.1.8` 已发布到官方 npm registry（维护者 `dabuliu_wsy`；经 npm staged publishing 审核后上线，tarball 与 GitHub Release v0.1.8 资产**字节一致**）。README 安装方式补回 npm 渠道，测试数同步为 311。
+- 待定：是否随下个功能版本一并发布（README/CHANGELOG 的 npm 页面展示需重新发版才更新）。
+
 ## 0.1.8（2026-11-13）
 
 - **规则 1 改为「确认即落板」**：原来要求「用户已确认**开工**才 `compass_plan`」，导致「先整回收站、前端白色后面再说」这类**已确认但排期靠后**的计划不会落板、等于被丢掉。现在：

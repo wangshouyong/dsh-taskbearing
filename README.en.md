@@ -60,11 +60,13 @@ The plugin consists of a host facet and a client facet, loaded as a plugin of a 
 1. Put the package into the DSH profile you use (either way):
    ```bash
    cd "$DSH_HOME/profiles/<profile>"
-   # option 1: install straight from GitHub (recommended, tracks main)
+   # option 1: official npm registry (recommended: pinned, traceable)
+   npm install dsh-taskbearing@0.1.8
+   # option 2: install straight from GitHub (tracks main, always latest commit)
    npm install github:wangshouyong/dsh-taskbearing
-   # option 2: download the GitHub Release tarball and install locally
+   # option 3: download the GitHub Release tarball and install locally (same artifact as npm)
    #   https://github.com/wangshouyong/dsh-taskbearing/releases
-   npm install ./dsh-taskbearing-0.1.2.tgz
+   npm install ./dsh-taskbearing-0.1.8.tgz
    # or link locally during development (Windows junction / Unix symlink)
    #   <profile>/node_modules/dsh-taskbearing -> path to this repo
    ```
@@ -118,7 +120,7 @@ From then on, before finishing each turn the AI self-checks against the rules in
 
 ```bash
 npm install          # devDependency: vite (only needed to build the client)
-node --test          # full unit test suite (currently 274 tests)
+node --test          # full unit test suite (currently 311 tests)
 npm run build:client # build the client facet → lib/client.js
 ```
 
