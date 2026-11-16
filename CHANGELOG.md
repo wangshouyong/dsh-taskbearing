@@ -2,10 +2,13 @@
 
 本项目遵循语义化版本（SemVer）。
 
-## 未发布（0.1.9 计划）
+## 0.1.9（2026-11-16）
 
-- **npm 渠道恢复**：`dsh-taskbearing@0.1.8` 已发布到官方 npm registry（维护者 `dabuliu_wsy`；经 npm staged publishing 审核后上线，tarball 与 GitHub Release v0.1.8 资产**字节一致**）。README 安装方式补回 npm 渠道，测试数同步为 311。
-- 待定：是否随下个功能版本一并发布（README/CHANGELOG 的 npm 页面展示需重新发版才更新）。
+文档/发布渠道版本，无功能改动（与 0.1.8 运行时代码一致）。
+
+- **npm 渠道恢复**：`dsh-taskbearing` 已上架官方 npm registry——首个版本 `0.1.8` 于 2026-11-16 发布（维护者 `dabuliu_wsy`；走 npm staged publishing 审核后自动放行）。经校验：npm tarball 与 GitHub Release v0.1.8 资产**字节完全一致**，integrity/sha1 均通过。
+- README 安装方式补回 npm 渠道：`npm install dsh-taskbearing`（不锁版本，默认 latest），并保留 GitHub 直装 / Release tarball 两种方式；tarball 示例改为泛化的 `dsh-taskbearing-<version>.tgz`。
+- README 测试数同步为 311；本版发布后 npm 页面 README 才会刷新为最新内容。
 
 ## 0.1.8（2026-11-13）
 

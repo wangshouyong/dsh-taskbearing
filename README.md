@@ -62,12 +62,12 @@
    ```bash
    cd "$DSH_HOME/profiles/<profile>"
    # 方式一：npm 官方 registry（推荐，版本固定、可追溯）
-   npm install dsh-taskbearing@0.1.8
+   npm install dsh-taskbearing
    # 方式二：直接从 GitHub 安装（追主干，最新提交）
    npm install github:wangshouyong/dsh-taskbearing
    # 方式三：下载 GitHub Release 的 tarball 后本地安装（与 npm 包同一份产物）
    #   https://github.com/wangshouyong/dsh-taskbearing/releases
-   npm install ./dsh-taskbearing-0.1.8.tgz
+   npm install ./dsh-taskbearing-<version>.tgz
    # 或开发期本地链接（Windows junction / Unix symlink）
    #   <profile>/node_modules/dsh-taskbearing -> 本仓库路径
    ```
