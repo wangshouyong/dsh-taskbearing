@@ -2,24 +2,26 @@
 
 **中文** | [English](README.en.md)
 
-**DSH（DeepSeek Harness）工作区级任务记忆与方向恢复插件。**
-把 AI 的任务树、双线状态、逐字原话基线和追溯链按工作区存下来，在右侧栏给你一个可读、可追溯、可交接的任务板。
+**dsh-taskbearing —— 给「人」的工作方向板，不是给 AI 的工具箱。**
+它把你们一起做过的事，落成一块随时能看懂、能追溯、能交接的板：最初要什么（逐字原话）、现在到哪（双线状态）、为什么转向（追溯链）、哪几件在等你拍板（钉顶）。**AI 负责记账，你负责看方向。**
 
-> A workspace-scoped task memory & context-recovery plugin for DeepSeek Harness (DSH):
-> requirement tree, dual status lines, verbatim user-original baseline, traceability, and a sidebar task board.
+> A **direction board for you**, not a toolbox for the AI: a workspace-scoped task memory plugin for DeepSeek Harness (DSH) — what was wanted (verbatim originals), where it stands (dual status lines), why direction changed (trace chain), and what awaits your call (pinned rulings).
 
 ---
 
-## 它解决什么
+## 它解决什么（人的视角）
 
-- **方向感丢失**：聊了几十轮，忘了最初要什么、现在做到哪。
-- **状态不可读**：AI 写的进度满是函数名，人看不懂。
-- **切换会话断档**：新会话接不上子步骤级进度。
-- **路径/事实靠记忆**：AI 在详情里编造文件路径——本插件在工具层直接拒写（见下）。
+- **方向感丢失**：聊了几十轮，忘了最初要什么、为什么改方向 → 逐字原话基线 + 需求树
+- **隔天断档**：新会话接不上子步骤级进度 → 任务板 + 一键交接复制
+- **不知道先做哪个**：一堆任务分不清哪几件在等你拍板 → 钉顶「待裁决」+ 三视图
+- **分不清「放弃」还是「暂时收起来」** → 双线状态 + 回收站（可还原）
+- **不敢信 AI 写的进度**：路径靠编、状态靠说 → 完成说明三闸门 + 路径强校验 + 追溯链，让板上的字可信
 
-设计原则：**判断权归 AI，插件只做格式、完整性与事实性校验**（不判断"做完没有/覆盖没有/是否冲突"）。
+设计原则：**人定方向、AI 记账、板给人读。** 判断权在人与 AI；插件只做格式、完整性与事实性校验——**目的是让这块板对你可信，而不是替你做决定**。
 
 ## 特性
+
+> 下面这些机制主要是「**为什么这块板可信**」（AI 侧纪律）；日常你不需要手动维护它。
 
 - **需求树**：需求 → 任务 → 步骤，层级按从属关系组织，支持中间插入（`after`/`before`）与换父。
 - **双线状态**：执行线（未开始 / 进行中 / 已阻塞 / 已执行）+ 裁决线（待裁决 / 冲突 / 已废弃 / 已替代）。

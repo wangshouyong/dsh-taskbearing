@@ -2,23 +2,26 @@
 
 [中文](README.md) | **English**
 
-**A workspace-scoped task memory & context-recovery plugin for DSH (DeepSeek Harness).**
-It stores the agent's task tree, dual status lines, verbatim user-original baseline and traceability per workspace, and gives you a readable, auditable, handoff-ready task board in the right sidebar.
+**dsh-taskbearing — a direction board for you, not a toolbox for the AI.**
+It turns what you and the agent did together into a board you can always read, audit and hand off: what was wanted (verbatim originals), where it stands (dual status lines), why the direction changed (trace chain), and what is waiting for your call (pinned rulings). **The AI keeps the books; you keep the direction.**
 
 > 这是本仓库 README 的英文版；中文版见 [README.md](README.md)（正文数据与接口契约见 `docs/`，目前为中文）。
 
 ---
 
-## What it solves
+## What it solves (from the human side)
 
-- **Loss of direction**: after dozens of turns, nobody remembers the original goal or how far you got.
-- **Unreadable status**: the agent's progress notes are full of function names; humans can't scan them.
-- **Broken handoff**: a new session can't pick up sub-step-level progress.
-- **Paths/facts by memory**: agents invent file paths in detail notes — this plugin refuses such writes at the tool layer (see below).
+- **Lost direction**: dozens of turns in, you forget the original goal or why the direction changed → verbatim baseline + requirement tree.
+- **Next-day gap**: a new session cannot pick up sub-step progress → task board + one-click handoff copy.
+- **No idea what to do first**: many tasks, and it is unclear which ones are waiting for your ruling → pinned "needs ruling" + three views.
+- **"Abandoned" vs "temporarily shelved"**: hard to tell apart → dual status lines + recycle bin (reversible).
+- **Can't trust agent-written progress**: invented paths, self-declared status → completion gates + path hard checks + trace chain make every word on the board trustworthy.
 
-Design principle: **judgement stays with the AI; the plugin only enforces format, completeness and factual checks** (it does not decide "done or not / covered or not / conflicting or not").
+Design principle: **people set the direction, the AI keeps the books, the board is read by people.** Judgement stays with the human and the AI; the plugin only enforces format, completeness and factual checks — **to make the board trustworthy for you, not to decide for you**.
 
 ## Features
+
+> The mechanisms below are mostly "**why this board can be trusted**" (agent-side discipline); you do not have to maintain them by hand.
 
 - **Requirement tree**: requirement → task → step, organized by ownership, with mid-order insertion (`after`/`before`) and re-parenting.
 - **Dual status lines**: execution line (not started / in progress / blocked / done) + verdict line (needs ruling / conflict / abandoned / superseded).
